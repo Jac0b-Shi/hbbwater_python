@@ -1,0 +1,142 @@
+# 校园水浸监测系统 - Docker Compose 配置
+# 一键部署所有服务
+
+services:
+  # MySQL 数据库
+  mysql:
+    image: mysql:8.0
+    container_name: flood-monitoring-mysql
+    restart: unless-stopped
+    command: --event-scheduler=ON
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root_password_2025}
+      MYSQL_DATABASE: ${DB_NAME:-flood_monitoring}
+      MYSQL_USER: ${DB_USER:-flood_user}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-flood_monitoring_2025}
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./database/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - ./database/procedures.sql:/docker-entrypoint-initdb.d/02-procedures.sql:ro
+    ports:
+      - "3306:3306"
+    networks:
+      - flood-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-root_password_2025}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # FastAPI 后端服务
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: flood-monitoring-backend
+    restart: unless-stopped
+    environment:
+      DB_HOST: mysql
+      DB_PORT: 3306
+      DB_NAME: ${DB_NAME:-flood_monitoring}
+      DB_USER: ${DB_USER:-flood_user}
+      DB_PASSWORD: ${DB_PASSWORD:-flood_monitoring_2025}
+      API_HOST: 0.0.0.0
+      API_PORT: 8000
+      DEBUG: ${DEBUG:-false}
+      SECRET_KEY: ${SECRET_KEY:-your-secret-key-change-this-in-production}
+      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost,http://localhost:80}
+      DATA_RETENTION_DAYS: ${DATA_RETENTION_DAYS:-14}
+      OFFLINE_TIMEOUT_MINUTES: ${OFFLINE_TIMEOUT_MINUTES:-60}
+      ALERT_COOLDOWN_MINUTES: ${ALERT_COOLDOWN_MINUTES:-30}
+      WORDPRESS_URL: http://wordpress
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - flood-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Webhook 代理服务
+  webhook-proxy:
+    build:
+      context: ./webhook_proxy
+      dockerfile: Dockerfile
+    container_name: flood-monitoring-webhook
+    restart: unless-stopped
+    environment:
+      WEBHOOK_KEY: ${WEBHOOK_KEY:-}
+      API_ENDPOINT: http://backend:8000/sensors/data
+    ports:
+      - "8080:8080/tcp"
+      - "8080:8080/udp"
+    depends_on:
+      - backend
+    networks:
+      - flood-network
+
+  # Vue 前端服务
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: flood-monitoring-frontend
+    restart: unless-stopped
+    networks:
+      - flood-network
+
+  # WordPress 后端（用于用户管理和邮件服务）
+  wordpress:
+    image: wordpress:6-php8.1-apache
+    container_name: flood-monitoring-wordpress
+    restart: unless-stopped
+    environment:
+      WORDPRESS_DB_HOST: mysql
+      WORDPRESS_DB_NAME: ${DB_NAME:-flood_monitoring}
+      WORDPRESS_DB_USER: ${DB_USER:-flood_user}
+      WORDPRESS_DB_PASSWORD: ${DB_PASSWORD:-flood_monitoring_2025}
+      WORDPRESS_TABLE_PREFIX: wp_
+      # 后端 API 地址
+      FLOOD_MONITOR_BACKEND_URL: http://backend:8000
+    volumes:
+      - wordpress_data:/var/www/html
+      - ./wordpress/wp-content/plugins:/var/www/html/wp-content/plugins:ro
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - flood-network
+
+  # Caddy 反向代理
+  caddy:
+    build:
+      context: ./caddy
+      dockerfile: Dockerfile
+    container_name: flood-monitoring-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "8000:8000"
+    depends_on:
+      - backend
+      - frontend
+      - webhook-proxy
+      - wordpress
+    networks:
+      - flood-network
+
+networks:
+  flood-network:
+    driver: bridge
+
+volumes:
+  mysql_data:
+    driver: local
+  wordpress_data:
+    driver: local

@@ -1,0 +1,50 @@
+.git
+.gitattributes
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# Local environment
+.env
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*.so
+backend/venv/
+venv/
+env/
+*.egg-info/
+.pytest_cache/
+
+# Node
+frontend/node_modules/
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# Build output
+frontend/dist/
+dist/
+build/
+
+# Logs
+logs/
+*.log
+
+# Local tooling/cache
+.playwright-mcp/
+
+# Temporary captures and notes in project root
+/*.png
+/network-requests.txt
+
+# OS files
+.DS_Store
+Thumbs.db
