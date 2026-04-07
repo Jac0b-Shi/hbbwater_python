@@ -61,12 +61,40 @@ class Sensor(Base):
     is_active = Column(Boolean, default=True)
     report_method = Column(String(20), default="http_api")
     webhook_token = Column(String(64), unique=True, index=True, nullable=True)
+    webhook_group_id = Column(Integer, ForeignKey("webhook_groups.id", ondelete="SET NULL"), nullable=True, index=True)
+    webhook_group_token = Column(String(64), index=True, nullable=True)
+    device_imei = Column(String(32), unique=True, index=True, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     # Relationships
+    webhook_group = relationship("WebhookGroup", back_populates="sensors")
     readings = relationship("SensorReading", back_populates="sensor", cascade="all, delete-orphan")
     alerts = relationship("Alert", back_populates="sensor", cascade="all, delete-orphan")
+
+    @property
+    def webhook_group_name(self) -> Optional[str]:
+        return self.webhook_group.name if self.webhook_group else None
+
+    @property
+    def effective_webhook_group_token(self) -> Optional[str]:
+        if self.webhook_group:
+            return self.webhook_group.webhook_token
+        return self.webhook_group_token
+
+
+class WebhookGroup(Base):
+    __tablename__ = "webhook_groups"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(100), nullable=False)
+    description = Column(Text)
+    webhook_token = Column(String(64), unique=True, nullable=False, index=True)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    sensors = relationship("Sensor", back_populates="webhook_group")
 
 
 class SensorReading(Base):
@@ -91,6 +119,11 @@ class SensorReading(Base):
     
     # Relationships
     sensor = relationship("Sensor", back_populates="readings")
+
+    @property
+    def external_powered(self) -> bool:
+        raw_data = self.raw_data if isinstance(self.raw_data, dict) else {}
+        return bool(raw_data.get("external_powered"))
     
     __table_args__ = (
         Index("idx_sensor_time", "sensor_id", "recorded_at"),
@@ -132,4 +165,21 @@ class SystemConfig(Base):
     config_key = Column(String(100), unique=True, nullable=False)
     config_value = Column(Text)
     description = Column(String(255))
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class AdminUser(Base):
+    __tablename__ = "admin_users"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    username = Column(String(50), unique=True, nullable=False, index=True)
+    display_name = Column(String(50), nullable=False)
+    email = Column(String(255), unique=True, nullable=False, index=True)
+    phone = Column(String(32), default="")
+    role = Column(String(50), default="系统管理员")
+    password_hash = Column(String(255), default="")
+    auth_provider = Column(String(32), default="local")
+    external_subject = Column(String(128), nullable=True, index=True)
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

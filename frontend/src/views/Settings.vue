@@ -39,13 +39,6 @@
           <template #header>
             <span>通知设置</span>
           </template>
-          <!-- 隐藏的诱饵输入框 - 必须放在表单最前面才能捕获浏览器自动填充 -->
-          <div style="position: fixed; top: -1000px; left: -1000px; opacity: 0; pointer-events: none;">
-            <input type="text" name="email" autocomplete="email" />
-            <input type="text" name="username" autocomplete="username" />
-            <input type="password" name="password" autocomplete="current-password" />
-            <input type="password" name="new-password" autocomplete="new-password" />
-          </div>
           <el-form :model="notifyConfig" label-width="150px">
             <el-form-item label="邮件通知">
               <el-switch v-model="notifyConfig.email_enabled" />
@@ -59,25 +52,31 @@
             </el-form-item>
             <el-form-item label="发件人邮箱">
               <el-input 
-                ref="smtpUserInput"
                 v-model="notifyConfig.smtp_user" 
                 placeholder="alert@example.com" 
-                autocomplete="one-time-code" 
-                name="smtp-user-field" 
-                readonly
-                @focus="handleInputFocus($event, 'smtpUserInput')"
-                @click="handleInputClick('smtpUserInput')"
+                autocomplete="off"
+                name="smtp-user-config"
+                data-lpignore="true"
+                data-1p-ignore="true"
+                spellcheck="false"
               />
             </el-form-item>
             <el-form-item label="SMTP密码/授权码">
               <el-input 
-                v-model="notifyConfig.smtp_password" 
+                :key="smtpPasswordFieldKey"
+                v-model="smtpPasswordDraft" 
                 type="password"
                 show-password
-                placeholder="邮箱授权码或密码" 
-                autocomplete="new-password" 
-                name="smtp-pass-field"
+                :placeholder="notifyConfig.smtp_password_set ? '已保存授权码；如需更新，请输入新的授权码' : '邮箱授权码或密码'"
+                autocomplete="off"
+                name="smtp-password-config"
+                data-lpignore="true"
+                data-1p-ignore="true"
+                spellcheck="false"
+                clearable
               />
+              <span class="form-hint">{{ smtpPasswordHint }}</span>
+              <el-button link type="danger" @click="clearSmtpPassword">清空已保存密码</el-button>
             </el-form-item>
             <el-form-item label="使用SSL/TLS">
               <el-switch v-model="notifyConfig.smtp_ssl" />
@@ -90,8 +89,8 @@
               />
             </el-form-item>
             <el-form-item>
-              <el-button type="primary" @click="testEmail" :disabled="!notifyConfig.email_enabled || !testEmailAddress.trim()">测试邮件</el-button>
-              <el-button @click="saveNotifyConfig">保存配置</el-button>
+              <el-button type="primary" @click="testEmail" :disabled="!notifyConfigReady || !notifyConfig.email_enabled || !testEmailAddress.trim()" :loading="testingEmail">测试邮件</el-button>
+              <el-button @click="saveNotifyConfig" :disabled="!notifyConfigReady" :loading="savingNotifyConfig">保存配置</el-button>
             </el-form-item>
             <el-divider />
             <el-form-item label="Webhook通知">
@@ -101,9 +100,7 @@
               <el-input v-model="notifyConfig.webhook_url" placeholder="https://example.com/webhook" />
             </el-form-item>
             <el-form-item>
-              <el-tooltip content="敬请期待" placement="top">
-                <el-button disabled>测试 Webhook</el-button>
-              </el-tooltip>
+              <el-button type="primary" @click="testWebhook" :disabled="!notifyConfig.webhook_enabled || !notifyConfig.webhook_url.trim()">测试 Webhook</el-button>
             </el-form-item>
           </el-form>
         </el-card>
@@ -124,13 +121,13 @@
             <el-descriptions-item label="日汇总">{{ dbStats.daily_count?.toLocaleString() }} 条</el-descriptions-item>
           </el-descriptions>
           <div class="db-actions">
-            <el-tooltip content="敬请期待" placement="top">
-              <el-button type="primary" disabled>
+            <el-tooltip content="按保留策略归档并清理过期热数据" placement="top">
+              <el-button type="primary" :loading="maintenanceLoading" @click="runMaintenance">
                 <el-icon><Tools /></el-icon>执行维护任务
               </el-button>
             </el-tooltip>
-            <el-tooltip content="敬请期待" placement="top">
-              <el-button type="warning" disabled>
+            <el-tooltip content="执行 MySQL OPTIMIZE TABLE，可能需要较长时间" placement="top">
+              <el-button type="warning" :loading="optimizeLoading" @click="optimizeTables">
                 <el-icon><Rank /></el-icon>优化数据表
               </el-button>
             </el-tooltip>
@@ -161,7 +158,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import axios from 'axios'
 
@@ -178,11 +175,29 @@ const notifyConfig = ref({
   smtp_host: '',
   smtp_port: 587,
   smtp_user: '',
-  smtp_password: '',
+  smtp_password_set: false,
   smtp_ssl: true,
   webhook_enabled: false,
   webhook_url: ''
 })
+
+const notifyConfigReady = ref(false)
+const savingNotifyConfig = ref(false)
+const testingEmail = ref(false)
+const smtpPasswordDraft = ref('')
+const smtpPasswordFieldKey = ref(0)
+
+const smtpPasswordHint = computed(() => {
+  if (smtpPasswordDraft.value.trim()) {
+    return '将使用新的授权码覆盖当前已保存值'
+  }
+  return notifyConfig.value.smtp_password_set ? '授权码已保存在服务器端；留空则保持不变' : '尚未保存授权码'
+})
+
+const resetSmtpPasswordDraft = () => {
+  smtpPasswordDraft.value = ''
+  smtpPasswordFieldKey.value += 1
+}
 
 watch(() => notifyConfig.value.smtp_ssl, (val) => {
   notifyConfig.value.smtp_port = val ? 465 : 587
@@ -197,23 +212,6 @@ const dbStats = ref({
   daily_count: 0
 })
 
-const smtpUserInput = ref(null)
-
-// 处理输入框focus事件 - 移除readonly以允许输入
-const handleInputFocus = (event, refName) => {
-  if (refName === 'smtpUserInput' && smtpUserInput.value && smtpUserInput.value.input) {
-    smtpUserInput.value.input.removeAttribute('readonly')
-  }
-}
-
-// 处理输入框点击事件
-const handleInputClick = (refName) => {
-  if (refName === 'smtpUserInput' && smtpUserInput.value && smtpUserInput.value.input) {
-    smtpUserInput.value.input.removeAttribute('readonly')
-    smtpUserInput.value.input.focus()
-  }
-}
-
 const maintenanceLoading = ref(false)
 const optimizeLoading = ref(false)
 
@@ -227,11 +225,42 @@ const saveSystemConfig = async () => {
 }
 
 const saveNotifyConfig = async () => {
+  savingNotifyConfig.value = true
   try {
-    await axios.post('/api/config/notification', notifyConfig.value)
+    const payload = {
+      email_enabled: notifyConfig.value.email_enabled,
+      smtp_host: notifyConfig.value.smtp_host,
+      smtp_port: notifyConfig.value.smtp_port,
+      smtp_user: notifyConfig.value.smtp_user,
+      smtp_ssl: notifyConfig.value.smtp_ssl,
+      webhook_enabled: notifyConfig.value.webhook_enabled,
+      webhook_url: notifyConfig.value.webhook_url
+    }
+
+    const password = smtpPasswordDraft.value.trim()
+    if (password) {
+      payload.smtp_password = password
+    }
+
+    await axios.post('/api/config/notification', payload)
+    resetSmtpPasswordDraft()
+    notifyConfig.value.smtp_password_set = Boolean(password || notifyConfig.value.smtp_password_set)
     ElMessage.success('通知配置已保存')
   } catch (error) {
     ElMessage.error('保存失败: ' + getErrorMessage(error))
+  } finally {
+    savingNotifyConfig.value = false
+  }
+}
+
+const clearSmtpPassword = async () => {
+  try {
+    await axios.post('/api/config/notification', { clear_smtp_password: true })
+    resetSmtpPasswordDraft()
+    notifyConfig.value.smtp_password_set = false
+    ElMessage.success('已清空保存的 SMTP 密码')
+  } catch (error) {
+    ElMessage.error('清空失败: ' + getErrorMessage(error))
   }
 }
 
@@ -249,11 +278,14 @@ const testEmail = async () => {
     ElMessage.warning('请先填写测试邮箱')
     return
   }
+  testingEmail.value = true
   try {
     const response = await axios.post('/api/config/notification/test-email', { to })
     ElMessage.success(response.data.message || '测试邮件已发送')
   } catch (error) {
     ElMessage.error('发送失败: ' + getErrorMessage(error))
+  } finally {
+    testingEmail.value = false
   }
 }
 
@@ -269,11 +301,11 @@ const testWebhook = async () => {
 const runMaintenance = async () => {
   maintenanceLoading.value = true
   try {
-    // TODO: Call maintenance API
-    await new Promise(r => setTimeout(r, 1000))
-    ElMessage.success('维护任务执行完成')
-  } catch {
-    ElMessage.error('维护任务执行失败')
+    const response = await axios.post('/api/config/database/maintenance')
+    dbStats.value = response.data.stats || dbStats.value
+    ElMessage.success(response.data.message || '维护任务执行完成')
+  } catch (error) {
+    ElMessage.error('维护任务执行失败: ' + getErrorMessage(error))
   } finally {
     maintenanceLoading.value = false
   }
@@ -282,10 +314,11 @@ const runMaintenance = async () => {
 const optimizeTables = async () => {
   optimizeLoading.value = true
   try {
-    await new Promise(r => setTimeout(r, 1000))
-    ElMessage.success('数据表优化完成')
-  } catch {
-    ElMessage.error('优化失败')
+    const response = await axios.post('/api/config/database/optimize')
+    dbStats.value = response.data.stats || dbStats.value
+    ElMessage.success(response.data.message || '数据表优化完成')
+  } catch (error) {
+    ElMessage.error('优化失败: ' + getErrorMessage(error))
   } finally {
     optimizeLoading.value = false
   }
@@ -293,30 +326,16 @@ const optimizeTables = async () => {
 
 onMounted(async () => {
   try {
-    const [systemRes, notifyRes] = await Promise.all([
+    const [systemRes, notifyRes, statsRes] = await Promise.all([
       axios.get('/api/config/system'),
-      axios.get('/api/config/notification')
+      axios.get('/api/config/notification'),
+      axios.get('/api/config/database/stats')
     ])
     systemConfig.value = { ...systemConfig.value, ...systemRes.data }
     notifyConfig.value = { ...notifyConfig.value, ...notifyRes.data }
-    
-    // 防止浏览器自动填充：保存服务器返回的正确值
-    const serverUser = notifyRes.data.smtp_user || ''
-    const serverPass = notifyRes.data.smtp_password || ''
-    
-    // 多次延迟检查并强制重置值，以应对Chrome延迟自动填充
-    const delays = [100, 500, 1000, 2000]
-    delays.forEach(delay => {
-      setTimeout(() => {
-        // 如果值被浏览器自动填充覆盖了，强制重置为服务器值
-        if (notifyConfig.value.smtp_user !== serverUser) {
-          notifyConfig.value.smtp_user = serverUser
-        }
-        if (notifyConfig.value.smtp_password !== serverPass) {
-          notifyConfig.value.smtp_password = serverPass
-        }
-      }, delay)
-    })
+    dbStats.value = { ...dbStats.value, ...statsRes.data }
+    resetSmtpPasswordDraft()
+    notifyConfigReady.value = true
   } catch (error) {
     ElMessage.error('加载配置失败: ' + getErrorMessage(error))
   }
@@ -341,9 +360,5 @@ onMounted(async () => {
   margin-top: 20px;
   display: flex;
   gap: 12px;
-}
-
-.form-hint {
-  color: #409eff;
 }
 </style>

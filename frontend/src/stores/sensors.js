@@ -5,6 +5,7 @@ import axios from 'axios'
 export const useSensorStore = defineStore('sensors', () => {
   // State
   const sensors = ref([])
+  const groups = ref([])
   const readings = ref({})
   const timeSeries = ref({})
   const loading = ref(false)
@@ -13,6 +14,7 @@ export const useSensorStore = defineStore('sensors', () => {
 
   // Getters
   const allSensors = computed(() => sensors.value)
+  const allGroups = computed(() => groups.value)
   
   const ultrasonicSensors = computed(() => 
     sensors.value.filter(s => s.sensor_type === 'ultrasonic')
@@ -57,6 +59,17 @@ export const useSensorStore = defineStore('sensors', () => {
     }
   }
 
+  async function fetchGroups() {
+    try {
+      const response = await axios.get('/api/sensors/groups')
+      groups.value = response.data
+      return response.data
+    } catch (err) {
+      console.error('Failed to fetch webhook groups:', err)
+      throw err
+    }
+  }
+
   async function fetchSensor(sensorId) {
     try {
       const response = await axios.get(`/api/sensors/${sensorId}`)
@@ -74,6 +87,46 @@ export const useSensorStore = defineStore('sensors', () => {
       return response.data
     } catch (err) {
       console.error('Failed to create sensor:', err)
+      throw err
+    }
+  }
+
+  async function createGroup(groupData) {
+    try {
+      const response = await axios.post('/api/sensors/groups', groupData)
+      groups.value.unshift({ ...response.data, sensors: [] })
+      return response.data
+    } catch (err) {
+      console.error('Failed to create webhook group:', err)
+      throw err
+    }
+  }
+
+  async function updateGroup(groupId, groupData) {
+    try {
+      const response = await axios.patch(`/api/sensors/groups/${groupId}`, groupData)
+      const index = groups.value.findIndex(g => g.id === groupId)
+      if (index !== -1) {
+        groups.value[index] = { ...groups.value[index], ...response.data }
+      }
+      return response.data
+    } catch (err) {
+      console.error('Failed to update webhook group:', err)
+      throw err
+    }
+  }
+
+  async function deleteGroup(groupId) {
+    try {
+      await axios.delete(`/api/sensors/groups/${groupId}`)
+      groups.value = groups.value.filter(g => g.id !== groupId)
+      sensors.value = sensors.value.map(sensor => (
+        sensor.webhook_group_id === groupId
+          ? { ...sensor, webhook_group_id: null, webhook_group_name: null, device_imei: null }
+          : sensor
+      ))
+    } catch (err) {
+      console.error('Failed to delete webhook group:', err)
       throw err
     }
   }
@@ -157,6 +210,7 @@ export const useSensorStore = defineStore('sensors', () => {
   return {
     // State
     sensors,
+    groups,
     readings,
     timeSeries,
     loading,
@@ -164,6 +218,7 @@ export const useSensorStore = defineStore('sensors', () => {
     lastFetch,
     // Getters
     allSensors,
+    allGroups,
     ultrasonicSensors,
     immersionSensors,
     activeSensors,
@@ -171,9 +226,13 @@ export const useSensorStore = defineStore('sensors', () => {
     offlineSensors,
     // Actions
     fetchSensors,
+    fetchGroups,
     fetchSensor,
+    createGroup,
     createSensor,
+    updateGroup,
     updateSensor,
+    deleteGroup,
     deleteSensor,
     fetchReadings,
     fetchTimeSeries,

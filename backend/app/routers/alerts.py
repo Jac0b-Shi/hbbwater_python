@@ -10,8 +10,25 @@ from app.database import get_db
 from app.models import Alert, Sensor
 from app.schemas import AlertCreate, AlertResponse, AlertResolveRequest
 from app.services.email import send_alert_email
+from app.services.text import repair_mojibake
 
 router = APIRouter(prefix="/alerts", tags=["alerts"])
+
+
+def serialize_alert(alert: Alert) -> dict:
+    """Normalize alert content before returning it to the client."""
+    return {
+        "id": alert.id,
+        "sensor_id": alert.sensor_id,
+        "alert_type": alert.alert_type,
+        "severity": alert.severity,
+        "message": repair_mojibake(alert.message) or "",
+        "details": alert.details,
+        "is_resolved": alert.is_resolved,
+        "resolved_at": alert.resolved_at,
+        "resolved_by": alert.resolved_by,
+        "created_at": alert.created_at,
+    }
 
 
 @router.get("/", response_model=List[AlertResponse])
@@ -38,7 +55,7 @@ async def list_alerts(
     
     query = query.order_by(desc(Alert.created_at)).offset(offset).limit(limit)
     result = await db.execute(query)
-    return result.scalars().all()
+    return [serialize_alert(alert) for alert in result.scalars().all()]
 
 
 @router.get("/active", response_model=List[AlertResponse])
@@ -54,7 +71,7 @@ async def get_active_alerts(
     
     query = query.order_by(desc(Alert.created_at))
     result = await db.execute(query)
-    return result.scalars().all()
+    return [serialize_alert(alert) for alert in result.scalars().all()]
 
 
 @router.get("/{alert_id}", response_model=AlertResponse)
@@ -65,7 +82,7 @@ async def get_alert(alert_id: int, db: AsyncSession = Depends(get_db)):
     
     if not alert:
         raise HTTPException(status_code=404, detail="Alert not found")
-    return alert
+    return serialize_alert(alert)
 
 
 @router.post("/", response_model=AlertResponse, status_code=201)
@@ -89,7 +106,7 @@ async def create_alert(alert: AlertCreate, db: AsyncSession = Depends(get_db)):
                 db=db,
                 alert_type=alert.alert_type,
                 severity=alert.severity,
-                sensor_name=sensor.name or alert.sensor_id,
+                sensor_name=sensor.sensor_id,
                 location=sensor.location or "未知位置",
                 message=alert.message or f"检测到 {alert.alert_type} 告警"
             )
@@ -97,7 +114,7 @@ async def create_alert(alert: AlertCreate, db: AsyncSession = Depends(get_db)):
             # Log error but don't fail the alert creation
             pass
     
-    return db_alert
+    return serialize_alert(db_alert)
 
 
 @router.post("/{alert_id}/resolve", response_model=AlertResponse)
@@ -122,7 +139,7 @@ async def resolve_alert(
     
     await db.commit()
     await db.refresh(alert)
-    return alert
+    return serialize_alert(alert)
 
 
 @router.get("/stats/summary")

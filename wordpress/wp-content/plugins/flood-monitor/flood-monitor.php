@@ -13,6 +13,20 @@ if (!defined('ABSPATH')) {
 
 // 后端 API 地址（可通过环境变量或 wp-config.php 定义）
 define('FLOOD_MONITOR_BACKEND_URL', getenv('FLOOD_MONITOR_BACKEND_URL') ?: 'http://backend:8000');
+define('FLOOD_MONITOR_SHARED_TOKEN', getenv('FLOOD_MONITOR_SHARED_TOKEN') ?: '');
+
+function flood_monitor_validate_internal_token(WP_REST_Request $request) {
+    if (empty(FLOOD_MONITOR_SHARED_TOKEN)) {
+        return new WP_Error('flood_monitor_missing_token', '内部通信令牌未配置', ['status' => 503]);
+    }
+
+    $provided = trim((string) $request->get_header('X-Internal-Token'));
+    if (empty($provided) || !hash_equals(FLOOD_MONITOR_SHARED_TOKEN, $provided)) {
+        return new WP_Error('flood_monitor_invalid_token', '无效的内部通信令牌', ['status' => 403]);
+    }
+
+    return true;
+}
 
 /**
  * 注册 REST API 路由
@@ -21,13 +35,13 @@ add_action('rest_api_init', function () {
     register_rest_route('flood-monitor/v1', '/send-mail', [
         'methods' => 'POST',
         'callback' => 'flood_monitor_send_mail',
-        'permission_callback' => '__return_true',
+        'permission_callback' => 'flood_monitor_validate_internal_token',
     ]);
     
     register_rest_route('flood-monitor/v1', '/test-mail', [
         'methods' => 'POST',
         'callback' => 'flood_monitor_test_mail',
-        'permission_callback' => '__return_true',
+        'permission_callback' => 'flood_monitor_validate_internal_token',
     ]);
 });
 
@@ -48,6 +62,9 @@ function flood_monitor_get_mail_config() {
     $response = wp_remote_get($api_url, [
         'timeout' => 10,
         'sslverify' => false,
+        'headers' => [
+            'X-Internal-Token' => FLOOD_MONITOR_SHARED_TOKEN,
+        ],
     ]);
     
     if (is_wp_error($response)) {

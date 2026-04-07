@@ -51,6 +51,7 @@ services:
       OFFLINE_TIMEOUT_MINUTES: ${OFFLINE_TIMEOUT_MINUTES:-60}
       ALERT_COOLDOWN_MINUTES: ${ALERT_COOLDOWN_MINUTES:-30}
       WORDPRESS_URL: http://wordpress
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-change-this-in-production}
     depends_on:
       mysql:
         condition: service_healthy
@@ -104,6 +105,7 @@ services:
       WORDPRESS_TABLE_PREFIX: wp_
       # 后端 API 地址
       FLOOD_MONITOR_BACKEND_URL: http://backend:8000
+      FLOOD_MONITOR_SHARED_TOKEN: ${INTERNAL_API_TOKEN:-change-this-in-production}
     volumes:
       - wordpress_data:/var/www/html
       - ./wordpress/wp-content/plugins:/var/www/html/wp-content/plugins:ro

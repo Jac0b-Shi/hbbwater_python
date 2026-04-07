@@ -19,6 +19,9 @@ class SensorBase(BaseModel):
     is_active: bool = True
     report_method: str = Field(default="http_api", pattern="^(http_api|webhook|mqtt|coap|udp_binary)$")
     webhook_token: Optional[str] = Field(None, max_length=64)
+    webhook_group_id: Optional[int] = None
+    webhook_group_token: Optional[str] = Field(None, max_length=64)
+    device_imei: Optional[str] = Field(None, max_length=32)
 
 
 class SensorCreate(SensorBase):
@@ -36,10 +39,14 @@ class SensorUpdate(BaseModel):
     is_active: Optional[bool] = None
     report_method: Optional[str] = Field(None, pattern="^(http_api|webhook|mqtt|coap|udp_binary)$")
     webhook_token: Optional[str] = Field(None, max_length=64)
+    webhook_group_id: Optional[int] = None
+    webhook_group_token: Optional[str] = Field(None, max_length=64)
+    device_imei: Optional[str] = Field(None, max_length=32)
 
 
 class SensorResponse(SensorBase):
     id: int
+    webhook_group_name: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     
@@ -52,6 +59,7 @@ class SensorResponse(SensorBase):
 class UltrasonicReading(BaseModel):
     water_level: Decimal = Field(..., description="水位(cm)")
     battery_level: Optional[Decimal] = Field(None, ge=0, le=100)
+    external_powered: Optional[bool] = False
     signal_strength: Optional[int] = None
 
 
@@ -59,6 +67,7 @@ class ImmersionReading(BaseModel):
     water_detected: bool
     duration: Optional[int] = Field(None, ge=0, description="持续时间(秒)")
     severity: Optional[str] = Field(None, pattern="^(low|medium|high)$")
+    external_powered: Optional[bool] = False
 
 
 class SensorDataInput(BaseModel):
@@ -70,6 +79,7 @@ class SensorDataInput(BaseModel):
     # Ultrasonic fields
     water_level: Optional[Decimal] = None
     battery_level: Optional[Decimal] = Field(None, ge=0, le=100)
+    external_powered: Optional[bool] = False
     signal_strength: Optional[int] = None
     # Immersion fields
     water_detected: Optional[bool] = None
@@ -94,6 +104,7 @@ class WebhookDataInput(BaseModel):
     # Ultrasonic fields
     water_level: Optional[Decimal] = None
     battery_level: Optional[Decimal] = Field(None, ge=0, le=100)
+    external_powered: Optional[bool] = False
     signal_strength: Optional[int] = None
     # Immersion fields
     water_detected: Optional[bool] = None
@@ -103,6 +114,40 @@ class WebhookDataInput(BaseModel):
     @field_validator('timestamp', mode='before')
     @classmethod
     def parse_timestamp(cls, v):
+        if isinstance(v, str):
+            if v.endswith('Z'):
+                v = v[:-1] + '+00:00'
+            return datetime.fromisoformat(v)
+        return v
+
+
+class GroupWebhookDataInput(BaseModel):
+    """Payload received from a shared/group webhook that routes by device IMEI."""
+    timestamp: Optional[datetime] = None
+    sensor_type: Optional[str] = Field(None, pattern="^(ultrasonic|immersion)$")
+    device_imei: Optional[str] = Field(None, max_length=32)
+    imei: Optional[str] = Field(None, max_length=32)
+    device_id: Optional[str] = Field(None, max_length=32)
+    source: Optional[str] = None
+    source_ip: Optional[str] = None
+    source_port: Optional[int] = None
+    msg_type: Optional[int] = None
+    msg_type_name: Optional[str] = None
+    water_level: Optional[Decimal] = None
+    measurement_value: Optional[Decimal] = None
+    sensor_value: Optional[Decimal] = None
+    water_detected: Optional[bool] = None
+    water_status: Optional[int] = None
+    water_status_text: Optional[str] = None
+    adc_raw: Optional[int] = None
+    voltage: Optional[Decimal] = None
+    raw_hex: Optional[str] = None
+    packet_size: Optional[int] = None
+    status: Optional[str] = Field(None, pattern="^(normal|warning|danger|alarm|offline)$")
+
+    @field_validator('timestamp', mode='before')
+    @classmethod
+    def parse_group_timestamp(cls, v):
         if isinstance(v, str):
             if v.endswith('Z'):
                 v = v[:-1] + '+00:00'
@@ -120,6 +165,7 @@ class SensorReadingResponse(BaseModel):
     severity: Optional[str]
     status: str
     battery_level: Optional[Decimal]
+    external_powered: bool = False
     signal_strength: Optional[int]
     recorded_at: datetime
     created_at: datetime
@@ -133,6 +179,37 @@ class SensorReadingList(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class WebhookGroupBase(BaseModel):
+    name: str = Field(..., max_length=100)
+    description: Optional[str] = None
+    is_active: bool = True
+
+
+class WebhookGroupCreate(WebhookGroupBase):
+    webhook_token: Optional[str] = Field(None, max_length=64)
+
+
+class WebhookGroupUpdate(BaseModel):
+    name: Optional[str] = Field(None, max_length=100)
+    description: Optional[str] = None
+    is_active: Optional[bool] = None
+    webhook_token: Optional[str] = Field(None, max_length=64)
+
+
+class WebhookGroupResponse(WebhookGroupBase):
+    id: int
+    webhook_token: str
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class WebhookGroupDetail(WebhookGroupResponse):
+    sensors: List[SensorResponse]
 
 
 # ==================== Alert Schemas ====================
@@ -174,6 +251,7 @@ class SensorStatus(BaseModel):
     status: str
     last_reading: Optional[datetime]
     battery_level: Optional[Decimal]
+    external_powered: bool = False
     water_level: Optional[Decimal]
     water_detected: Optional[bool]
     is_online: bool

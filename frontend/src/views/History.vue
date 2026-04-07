@@ -84,8 +84,8 @@
             <span v-else>-</span>
           </template>
         </el-table-column>
-        <el-table-column prop="battery_level" label="电量(%)" width="100">
-          <template #default="{ row }">{{ row.battery_level?.toFixed(1) || '-' }}</template>
+        <el-table-column label="供电/电量" width="120">
+          <template #default="{ row }">{{ row.external_powered ? '外接供电' : (row.battery_level?.toFixed(1) || '-') }}</template>
         </el-table-column>
       </el-table>
 
@@ -106,7 +106,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { use } from 'echarts/core'
 import { CanvasRenderer } from 'echarts/renderers'
@@ -129,6 +129,7 @@ const historyData = ref([])
 const loading = ref(false)
 const currentPage = ref(1)
 const pageSize = ref(100)
+let refreshTimer = null
 
 const ultrasonicSensors = computed(() => sensorStore.ultrasonicSensors)
 const immersionSensors = computed(() => sensorStore.immersionSensors)
@@ -219,7 +220,7 @@ const resetFilter = () => {
 const exportData = () => {
   const sensor = sensorStore.sensors.find(s => s.sensor_id === filterForm.value.sensor_id)
   const csvContent = [
-    ['时间', '传感器ID', '位置', '状态', '水位(cm)', '浸水', '电量(%)', '信号(dBm)'].join(','),
+    ['时间', '传感器ID', '位置', '状态', '水位(cm)', '浸水', '供电/电量', '信号(dBm)'].join(','),
     ...historyData.value.map(row => [
       formatTime(row.recorded_at),
       row.sensor_id,
@@ -227,7 +228,7 @@ const exportData = () => {
       row.status,
       row.water_level ?? '',
       row.water_detected ?? '',
-      row.battery_level ?? '',
+      row.external_powered ? '外接供电' : (row.battery_level ?? ''),
       row.signal_strength ?? ''
     ].join(','))
   ].join('\n')
@@ -242,6 +243,18 @@ const exportData = () => {
 
 onMounted(() => {
   sensorStore.fetchSensors()
+  refreshTimer = setInterval(() => {
+    sensorStore.fetchSensors()
+    if (filterForm.value.sensor_id) {
+      queryHistory()
+    }
+  }, 10000)
+})
+
+onUnmounted(() => {
+  if (refreshTimer) {
+    clearInterval(refreshTimer)
+  }
 })
 </script>
 

@@ -9,6 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_db
 from app.models import Sensor, SensorReading, Alert, SensorType
 from app.schemas import DashboardStats, SensorStatus
+from app.services.system_config import get_offline_timeout_minutes
+from app.services.text import repair_mojibake
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
@@ -43,7 +45,8 @@ async def get_dashboard_stats(db: AsyncSession = Depends(get_db)):
     today_readings = readings_result.scalar()
     
     # Online/offline calculation
-    offline_threshold = datetime.utcnow() - timedelta(minutes=60)
+    offline_timeout_minutes = await get_offline_timeout_minutes(db)
+    offline_threshold = datetime.utcnow() - timedelta(minutes=offline_timeout_minutes)
     
     # Get latest reading time for each sensor
     latest_readings_query = select(
@@ -78,7 +81,8 @@ async def get_all_sensors_status(db: AsyncSession = Depends(get_db)):
     result = await db.execute(query)
     sensors = result.scalars().all()
     
-    offline_threshold = datetime.utcnow() - timedelta(minutes=60)
+    offline_timeout_minutes = await get_offline_timeout_minutes(db)
+    offline_threshold = datetime.utcnow() - timedelta(minutes=offline_timeout_minutes)
     statuses = []
     
     for sensor in sensors:
@@ -99,9 +103,10 @@ async def get_all_sensors_status(db: AsyncSession = Depends(get_db)):
             sensor_id=sensor.sensor_id,
             sensor_type=sensor.sensor_type,
             location=sensor.location,
-            status=latest_reading.status.value if latest_reading else "offline",
+            status=latest_reading.status if latest_reading else "offline",
             last_reading=latest_reading.recorded_at if latest_reading else None,
             battery_level=latest_reading.battery_level if latest_reading else None,
+            external_powered=latest_reading.external_powered if latest_reading else False,
             water_level=latest_reading.water_level if latest_reading else None,
             water_detected=latest_reading.water_detected if latest_reading else None,
             is_online=is_online
@@ -138,6 +143,7 @@ async def get_recent_readings(limit: int = 20, db: AsyncSession = Depends(get_db
             "water_detected": reading.water_detected,
             "status": reading.status,
             "battery_level": float(reading.battery_level) if reading.battery_level else None,
+            "external_powered": reading.external_powered,
             "recorded_at": reading.recorded_at.isoformat()
         })
     
@@ -170,7 +176,7 @@ async def get_recent_alerts(limit: int = 10, db: AsyncSession = Depends(get_db))
             "location": row[1],
             "alert_type": alert.alert_type,
             "severity": alert.severity,
-            "message": alert.message,
+            "message": repair_mojibake(alert.message) or "",
             "created_at": alert.created_at.isoformat()
         })
     

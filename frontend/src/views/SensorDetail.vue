@@ -18,6 +18,12 @@
             </el-descriptions-item>
             <el-descriptions-item label="位置">{{ sensor.location }}</el-descriptions-item>
             <el-descriptions-item label="描述">{{ sensor.description || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="上报方式">{{ formatReportMethod(sensor) }}</el-descriptions-item>
+            <el-descriptions-item v-if="sensor.webhook_group_name" label="所属组">{{ sensor.webhook_group_name }}</el-descriptions-item>
+            <el-descriptions-item v-if="sensor.device_imei" label="设备IMEI">{{ sensor.device_imei }}</el-descriptions-item>
+            <el-descriptions-item v-if="sensor.webhook_group_name && sensor.webhook_group_token" label="组Webhook">
+              {{ `${window.location.origin}/api/sensors/group-webhook/${sensor.webhook_group_token}` }}
+            </el-descriptions-item>
             <el-descriptions-item label="状态">
               <el-switch v-model="sensor.is_active" @change="updateActive" />
             </el-descriptions-item>
@@ -48,10 +54,13 @@
               <div class="reading-label">检测状态</div>
             </div>
             <div class="reading-extra">
-              <div v-if="latestReading.battery_level">
+              <div v-if="latestReading.external_powered">
+                <el-icon><Lightning /></el-icon> 供电: 外接有线电源
+              </div>
+              <div v-else-if="latestReading.battery_level !== null && latestReading.battery_level !== undefined">
                 <el-icon><Battery /></el-icon> 电量: {{ latestReading.battery_level.toFixed(1) }}%
               </div>
-              <div v-if="latestReading.signal_strength">
+              <div v-if="latestReading.signal_strength !== null && latestReading.signal_strength !== undefined">
                 <el-icon><Signal /></el-icon> 信号: {{ latestReading.signal_strength }} dBm
               </div>
             </div>
@@ -99,8 +108,10 @@
             <el-table-column v-else prop="water_detected" label="浸水">
               <template #default="{ row }">{{ row.water_detected ? '是' : '否' }}</template>
             </el-table-column>
-            <el-table-column prop="battery_level" label="电量(%)" width="100">
-              <template #default="{ row }">{{ row.battery_level?.toFixed(1) || '-' }}</template>
+            <el-table-column label="供电/电量" width="140">
+              <template #default="{ row }">
+                {{ row.external_powered ? '外接供电' : (row.battery_level?.toFixed(1) || '-') }}
+              </template>
             </el-table-column>
             <el-table-column prop="signal_strength" label="信号(dBm)" width="120" />
           </el-table>
@@ -111,7 +122,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { use } from 'echarts/core'
@@ -127,6 +138,7 @@ use([CanvasRenderer, LineChart, GridComponent, TooltipComponent, LegendComponent
 const route = useRoute()
 const sensorStore = useSensorStore()
 const sensorId = computed(() => route.params.id)
+let refreshTimer = null
 
 const sensor = ref(null)
 const readings = ref([])
@@ -192,6 +204,22 @@ const getStatusText = (status) => {
   return map[status] || status
 }
 
+const formatReportMethod = (sensorData) => {
+  if (sensorData?.webhook_group_name || sensorData?.webhook_group_token) {
+    return '组 Webhook'
+  }
+
+  const method = sensorData?.report_method
+  const map = {
+    http_api: 'HTTP API',
+    webhook: '独立 Webhook',
+    udp_binary: 'UDP 二进制组 Webhook',
+    mqtt: 'MQTT',
+    coap: 'CoAP'
+  }
+  return map[method] || method || '-'
+}
+
 const updateActive = async (val) => {
   try {
     await sensorStore.updateSensor(sensorId.value, { is_active: val })
@@ -219,7 +247,18 @@ const fetchData = async () => {
 watch(timeRange, fetchData)
 watch(sensorId, fetchData)
 
-onMounted(fetchData)
+onMounted(async () => {
+  await fetchData()
+  refreshTimer = setInterval(() => {
+    fetchData()
+  }, 5000)
+})
+
+onUnmounted(() => {
+  if (refreshTimer) {
+    clearInterval(refreshTimer)
+  }
+})
 </script>
 
 <style scoped>

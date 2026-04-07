@@ -40,10 +40,14 @@ logs/
 
 # Local tooling/cache
 .playwright-mcp/
+.aiassistant/
 
 # Temporary captures and notes in project root
 /*.png
 /network-requests.txt
+
+# Local reference scripts
+tools/webhook_proxy.py
 
 # OS files
 .DS_Store

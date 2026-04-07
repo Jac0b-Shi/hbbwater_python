@@ -15,6 +15,7 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 WORDPRESS_BASE_URL = os.getenv("WORDPRESS_URL", "http://wordpress")
 WORDPRESS_MAIL_API = f"{WORDPRESS_BASE_URL}/wp-json/flood-monitor/v1/send-mail"
 WORDPRESS_TEST_API = f"{WORDPRESS_BASE_URL}/wp-json/flood-monitor/v1/test-mail"
+INTERNAL_API_TOKEN = os.getenv("INTERNAL_API_TOKEN", "").strip()
 
 # 创建 httpx 客户端配置 - 在 Docker 内部网络中禁用 SSL 验证
 HTTPX_TIMEOUT = httpx.Timeout(30.0, connect=10.0)
@@ -53,7 +54,8 @@ async def send_email_via_wordpress(
             
             response = await client.post(
                 WORDPRESS_MAIL_API,
-                json=payload
+                json=payload,
+                headers={"X-Internal-Token": INTERNAL_API_TOKEN} if INTERNAL_API_TOKEN else None,
             )
             
             if response.status_code == 200:
@@ -79,7 +81,8 @@ async def send_test_email_via_wordpress(to: str) -> tuple[bool, str]:
         async with get_http_client() as client:
             response = await client.post(
                 WORDPRESS_TEST_API,
-                json={"to": to}
+                json={"to": to},
+                headers={"X-Internal-Token": INTERNAL_API_TOKEN} if INTERNAL_API_TOKEN else None,
             )
             
             if response.status_code == 200:

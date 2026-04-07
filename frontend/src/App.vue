@@ -70,8 +70,8 @@
             </el-tooltip>
             <el-dropdown trigger="click">
               <span class="user-info">
-                <el-avatar :size="32" :icon="UserFilled" />
-                <span class="username">管理员</span>
+                <el-avatar :size="32" :src="accountStore.avatarUrl" :icon="UserFilled" />
+                <span class="username">{{ accountStore.displayName }}</span>
                 <el-icon><ArrowDown /></el-icon>
               </span>
               <template #dropdown>
@@ -97,13 +97,15 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAlertStore } from './stores/alerts'
+import { useAccountStore } from './stores/account'
 import Breadcrumb from './components/Breadcrumb.vue'
 
 const route = useRoute()
 const alertStore = useAlertStore()
+const accountStore = useAccountStore()
 
 const isCollapse = ref(false)
 
@@ -124,6 +126,12 @@ const toggleFullscreen = () => {
     document.exitFullscreen()
   }
 }
+
+onMounted(() => {
+  accountStore.fetchProfile().catch((err) => {
+    console.error('Failed to initialize account profile:', err)
+  })
+})
 </script>
 
 <style scoped>

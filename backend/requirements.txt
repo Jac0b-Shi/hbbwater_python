@@ -11,6 +11,7 @@ alembic==1.14.0
 # Data Validation
 pydantic>=2.11.0
 pydantic-settings==2.6.1
+email-validator>=2.2.0
 
 # Async Support
 asyncio-mqtt==0.16.1
@@ -20,6 +21,8 @@ websockets==14.1
 python-dateutil==2.9.0
 pytz==2024.2
 orjson>=3.10.15
+httpx==0.28.1
+urllib3>=2.2.3
 
 # Security
 python-jose[cryptography]==3.3.0

@@ -4,11 +4,19 @@ from datetime import datetime
 from pydantic import BaseModel
 from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
 import httpx
 
 from app.database import get_db
-from app.models import SystemConfig
+from app.services.internal_auth import verify_internal_api_token
+from app.services.system_config import (
+    get_bool_config,
+    get_config_value,
+    get_database_stats,
+    get_int_config,
+    optimize_database_tables,
+    run_database_maintenance,
+    set_config_value,
+)
 
 router = APIRouter(prefix="/config", tags=["config"])
 
@@ -34,7 +42,7 @@ class NotificationConfigResponse(BaseModel):
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_user: str = ""
-    smtp_password: str = ""
+    smtp_password_set: bool = False
     smtp_ssl: bool = True
     webhook_enabled: bool = False
     webhook_url: str = ""
@@ -57,44 +65,37 @@ class NotificationConfigUpdate(BaseModel):
     smtp_port: Optional[int] = None
     smtp_user: Optional[str] = None
     smtp_password: Optional[str] = None
+    clear_smtp_password: Optional[bool] = None
     smtp_ssl: Optional[bool] = None
     webhook_enabled: Optional[bool] = None
     webhook_url: Optional[str] = None
 
 
-async def get_config_value(db: AsyncSession, key: str, default: str = "") -> str:
-    """Get config value by key."""
-    result = await db.execute(select(SystemConfig).filter(SystemConfig.config_key == key))
-    config = result.scalar_one_or_none()
-    return config.config_value if config else default
-
-
-async def set_config_value(db: AsyncSession, key: str, value: str, description: str = ""):
-    """Set config value by key."""
-    result = await db.execute(select(SystemConfig).filter(SystemConfig.config_key == key))
-    config = result.scalar_one_or_none()
-    if config:
-        config.config_value = value
-        config.updated_at = datetime.utcnow()
-    else:
-        config = SystemConfig(
-            config_key=key,
-            config_value=value,
-            description=description
-        )
-        db.add(config)
-    await db.commit()
+async def get_notification_config_values(db: AsyncSession) -> dict:
+    """Get notification config including secrets for internal server-side usage."""
+    smtp_password = await get_config_value(db, "smtp_password", "")
+    return {
+        "email_enabled": await get_bool_config(db, "email_enabled", False),
+        "smtp_host": await get_config_value(db, "smtp_host", ""),
+        "smtp_port": await get_int_config(db, "smtp_port", 587),
+        "smtp_user": await get_config_value(db, "smtp_user", ""),
+        "smtp_password": smtp_password,
+        "smtp_password_set": bool(smtp_password),
+        "smtp_ssl": await get_bool_config(db, "smtp_ssl", True),
+        "webhook_enabled": await get_bool_config(db, "webhook_enabled", False),
+        "webhook_url": await get_config_value(db, "webhook_url", ""),
+    }
 
 
 @router.get("/system", response_model=SystemConfigResponse)
 async def get_system_config(db: AsyncSession = Depends(get_db)):
     """Get system configuration."""
     return SystemConfigResponse(
-        data_retention_days=int(await get_config_value(db, "data_retention_days", "14")),
-        offline_timeout_minutes=int(await get_config_value(db, "offline_timeout_minutes", "60")),
-        alert_cooldown_minutes=int(await get_config_value(db, "alert_cooldown_minutes", "30")),
-        archive_enabled=(await get_config_value(db, "archive_enabled", "true")).lower() == "true",
-        summary_enabled=(await get_config_value(db, "summary_enabled", "true")).lower() == "true"
+        data_retention_days=await get_int_config(db, "data_retention_days", 14),
+        offline_timeout_minutes=await get_int_config(db, "offline_timeout_minutes", 60),
+        alert_cooldown_minutes=await get_int_config(db, "alert_cooldown_minutes", 30),
+        archive_enabled=await get_bool_config(db, "archive_enabled", True),
+        summary_enabled=await get_bool_config(db, "summary_enabled", True)
     )
 
 
@@ -115,6 +116,7 @@ async def update_system_config(
             await set_config_value(db, "archive_enabled", str(config.archive_enabled).lower(), "自动归档")
         if config.summary_enabled is not None:
             await set_config_value(db, "summary_enabled", str(config.summary_enabled).lower(), "数据统计")
+        await db.commit()
         return {"message": "系统配置已保存"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"保存失败: {str(e)}")
@@ -123,16 +125,8 @@ async def update_system_config(
 @router.get("/notification", response_model=NotificationConfigResponse)
 async def get_notification_config(db: AsyncSession = Depends(get_db)):
     """Get notification configuration."""
-    return NotificationConfigResponse(
-        email_enabled=(await get_config_value(db, "email_enabled", "false")).lower() == "true",
-        smtp_host=await get_config_value(db, "smtp_host", ""),
-        smtp_port=int(await get_config_value(db, "smtp_port", "587")),
-        smtp_user=await get_config_value(db, "smtp_user", ""),
-        smtp_password=await get_config_value(db, "smtp_password", ""),
-        smtp_ssl=(await get_config_value(db, "smtp_ssl", "true")).lower() == "true",
-        webhook_enabled=(await get_config_value(db, "webhook_enabled", "false")).lower() == "true",
-        webhook_url=await get_config_value(db, "webhook_url", "")
-    )
+    values = await get_notification_config_values(db)
+    return NotificationConfigResponse(**values)
 
 
 @router.post("/notification")
@@ -152,12 +146,15 @@ async def update_notification_config(
             await set_config_value(db, "smtp_user", config.smtp_user, "发件人邮箱")
         if config.smtp_password is not None:
             await set_config_value(db, "smtp_password", config.smtp_password, "SMTP密码")
+        elif config.clear_smtp_password:
+            await set_config_value(db, "smtp_password", "", "SMTP密码")
         if config.smtp_ssl is not None:
             await set_config_value(db, "smtp_ssl", str(config.smtp_ssl).lower(), "使用SSL/TLS")
         if config.webhook_enabled is not None:
             await set_config_value(db, "webhook_enabled", str(config.webhook_enabled).lower(), "Webhook通知开关")
         if config.webhook_url is not None:
             await set_config_value(db, "webhook_url", config.webhook_url, "Webhook URL")
+        await db.commit()
         return {"message": "通知配置已保存"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"保存失败: {str(e)}")
@@ -179,13 +176,13 @@ async def test_email_notification(
     """
     from app.services.email import send_test_email_via_wordpress
     
-    notify_config = await get_notification_config(db)
+    notify_config = await get_notification_config_values(db)
     
-    if not notify_config.email_enabled:
+    if not notify_config["email_enabled"]:
         raise HTTPException(status_code=400, detail="邮件通知未启用")
     
     # 使用传入的目标邮箱或配置的邮箱
-    recipient = request.to or notify_config.smtp_user
+    recipient = request.to or notify_config["smtp_user"]
     if not recipient:
         raise HTTPException(status_code=400, detail="未配置发件人邮箱，请提供目标邮箱")
     
@@ -204,24 +201,24 @@ async def test_email_notification(
         import smtplib
         from email.mime.text import MIMEText
         
-        if not notify_config.smtp_host or not notify_config.smtp_password:
+        if not notify_config["smtp_host"] or not notify_config["smtp_password"]:
             raise HTTPException(status_code=500, detail=f"WordPress 邮件服务失败: {message}")
         
         try:
             msg = MIMEText("这是一封测试邮件，来自水浸监测系统。", "plain", "utf-8")
             msg["Subject"] = "[水浸监测系统] 邮件测试"
-            msg["From"] = notify_config.smtp_user
+            msg["From"] = notify_config["smtp_user"]
             msg["To"] = recipient
             
-            if notify_config.smtp_port == 465:
-                server = smtplib.SMTP_SSL(notify_config.smtp_host, notify_config.smtp_port)
+            if notify_config["smtp_port"] == 465:
+                server = smtplib.SMTP_SSL(notify_config["smtp_host"], notify_config["smtp_port"])
             else:
-                server = smtplib.SMTP(notify_config.smtp_host, notify_config.smtp_port)
-                if notify_config.smtp_ssl:
+                server = smtplib.SMTP(notify_config["smtp_host"], notify_config["smtp_port"])
+                if notify_config["smtp_ssl"]:
                     server.starttls()
             
-            server.login(notify_config.smtp_user, notify_config.smtp_password)
-            server.sendmail(notify_config.smtp_user, [recipient], msg.as_string())
+            server.login(notify_config["smtp_user"], notify_config["smtp_password"])
+            server.sendmail(notify_config["smtp_user"], [recipient], msg.as_string())
             server.quit()
             
             return {"message": f"测试邮件已通过 SMTP 发送到 {recipient}"}
@@ -237,14 +234,17 @@ async def send_mail_via_wordpress(to: str, subject: str, message: str) -> bool:
 
 
 @router.get("/notification/mail-config")
-async def get_mail_config_for_wordpress(db: AsyncSession = Depends(get_db)):
+async def get_mail_config_for_wordpress(
+    _: None = Depends(verify_internal_api_token),
+    db: AsyncSession = Depends(get_db),
+):
     """Get mail configuration for WordPress plugin.
     
     This endpoint is called by WordPress to get SMTP settings.
     """
-    notify_config = await get_notification_config(db)
+    notify_config = await get_notification_config_values(db)
     
-    if not notify_config.email_enabled:
+    if not notify_config["email_enabled"]:
         return {
             "enabled": False,
             "message": "邮件通知未启用"
@@ -252,12 +252,12 @@ async def get_mail_config_for_wordpress(db: AsyncSession = Depends(get_db)):
     
     return {
         "enabled": True,
-        "smtp_host": notify_config.smtp_host,
-        "smtp_port": notify_config.smtp_port,
-        "smtp_user": notify_config.smtp_user,
-        "smtp_pass": notify_config.smtp_password,
-        "smtp_ssl": notify_config.smtp_ssl,
-        "from_email": notify_config.smtp_user  # 使用用户名作为发件人
+        "smtp_host": notify_config["smtp_host"],
+        "smtp_port": notify_config["smtp_port"],
+        "smtp_user": notify_config["smtp_user"],
+        "smtp_pass": notify_config["smtp_password"],
+        "smtp_ssl": notify_config["smtp_ssl"],
+        "from_email": notify_config["smtp_user"]  # 使用用户名作为发件人
     }
 
 
@@ -266,12 +266,12 @@ async def test_webhook_notification(db: AsyncSession = Depends(get_db)):
     """Send a test webhook notification."""
     import httpx
     
-    notify_config = await get_notification_config(db)
+    notify_config = await get_notification_config_values(db)
     
-    if not notify_config.webhook_enabled:
+    if not notify_config["webhook_enabled"]:
         raise HTTPException(status_code=400, detail="Webhook 通知未启用")
     
-    if not notify_config.webhook_url:
+    if not notify_config["webhook_url"]:
         raise HTTPException(status_code=400, detail="Webhook URL 未配置")
     
     try:
@@ -283,7 +283,7 @@ async def test_webhook_notification(db: AsyncSession = Depends(get_db)):
                 }
             }
             response = await client.post(
-                notify_config.webhook_url,
+                notify_config["webhook_url"],
                 json=payload,
                 timeout=10.0
             )
@@ -291,3 +291,35 @@ async def test_webhook_notification(db: AsyncSession = Depends(get_db)):
         return {"message": "测试 Webhook 已发送"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Webhook 发送失败: {str(e)}")
+
+
+@router.get("/database/stats")
+async def get_database_statistics(db: AsyncSession = Depends(get_db)):
+    """Get record counts for database tables shown in settings."""
+    return await get_database_stats(db)
+
+
+@router.post("/database/maintenance")
+async def execute_database_maintenance(db: AsyncSession = Depends(get_db)):
+    """Archive and purge expired readings according to retention config."""
+    try:
+        result = await run_database_maintenance(db)
+        return {
+            "message": f"维护完成，归档 {result['archived_rows']} 条，清理 {result['deleted_rows']} 条热数据",
+            **result,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"维护失败: {str(e)}")
+
+
+@router.post("/database/optimize")
+async def execute_database_optimize(db: AsyncSession = Depends(get_db)):
+    """Optimize operational tables."""
+    try:
+        result = await optimize_database_tables(db)
+        return {
+            "message": f"已优化 {result['optimized_tables']} 张数据表",
+            **result,
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"优化失败: {str(e)}")

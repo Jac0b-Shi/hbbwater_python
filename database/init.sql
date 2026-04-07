@@ -18,6 +18,18 @@ GRANT ALL PRIVILEGES ON flood_monitoring.* TO 'flood_user'@'%';
 
 FLUSH PRIVILEGES;
 
+-- Webhook 组配置表
+CREATE TABLE IF NOT EXISTS webhook_groups (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(100) NOT NULL COMMENT '组名称',
+    description TEXT COMMENT '组描述',
+    webhook_token VARCHAR(64) NOT NULL COMMENT '组Webhook标识',
+    is_active BOOLEAN DEFAULT TRUE COMMENT '是否启用',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_webhook_groups_token (webhook_token)
+) ENGINE=InnoDB COMMENT='Webhook组配置表';
+
 -- 传感器配置表
 CREATE TABLE IF NOT EXISTS sensors (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -32,11 +44,18 @@ CREATE TABLE IF NOT EXISTS sensors (
     is_active BOOLEAN DEFAULT TRUE COMMENT '是否启用',
     report_method ENUM('http_api', 'webhook', 'mqtt', 'coap', 'udp_binary') DEFAULT 'http_api' COMMENT '数据上报方式',
     webhook_token VARCHAR(64) DEFAULT NULL COMMENT 'Webhook唯一标识',
+    webhook_group_id INT DEFAULT NULL COMMENT '所属Webhook组ID',
+    webhook_group_token VARCHAR(64) DEFAULT NULL COMMENT '组Webhook标识，共享给同一类UDP设备',
+    device_imei VARCHAR(32) DEFAULT NULL COMMENT '绑定的设备IMEI',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX idx_type (sensor_type),
     INDEX idx_active (is_active),
-    UNIQUE KEY uk_webhook_token (webhook_token)
+    INDEX idx_sensors_webhook_group_id (webhook_group_id),
+    INDEX idx_webhook_group_token (webhook_group_token),
+    INDEX idx_device_imei (device_imei),
+    UNIQUE KEY uk_webhook_token (webhook_token),
+    UNIQUE KEY uk_device_imei (device_imei)
 ) ENGINE=InnoDB COMMENT='传感器配置表';
 
 -- 传感器原始数据表（热数据，≤14天）
@@ -158,12 +177,49 @@ CREATE TABLE IF NOT EXISTS system_config (
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB COMMENT='系统配置表';
 
+-- 管理员账户表
+CREATE TABLE IF NOT EXISTS admin_users (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    username VARCHAR(50) NOT NULL UNIQUE COMMENT '登录名',
+    display_name VARCHAR(50) NOT NULL COMMENT '显示名称',
+    email VARCHAR(255) NOT NULL UNIQUE COMMENT '邮箱',
+    phone VARCHAR(32) DEFAULT '' COMMENT '手机号',
+    role VARCHAR(50) DEFAULT '系统管理员' COMMENT '角色名称',
+    password_hash VARCHAR(255) DEFAULT '' COMMENT '本地密码哈希',
+    auth_provider VARCHAR(32) DEFAULT 'local' COMMENT '认证提供者',
+    external_subject VARCHAR(128) DEFAULT NULL COMMENT '外部身份主体标识',
+    is_active BOOLEAN DEFAULT TRUE COMMENT '是否启用',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_admin_auth_provider (auth_provider),
+    INDEX idx_admin_external_subject (external_subject)
+) ENGINE=InnoDB COMMENT='管理员账户表';
+
 -- 插入默认配置
 INSERT INTO system_config (config_key, config_value, description) VALUES
 ('data_retention_days', '14', '热数据保留天数'),
 ('archive_enabled', '1', '是否启用自动归档'),
 ('summary_enabled', '1', '是否启用数据统计'),
 ('alert_cooldown_minutes', '30', '相同告警冷却时间(分钟)'),
-('offline_timeout_minutes', '60', '传感器离线判定时间(分钟)');
+('offline_timeout_minutes', '60', '传感器离线判定时间(分钟)'),
+('account_provider', 'local', '当前账户认证提供者'),
+('account_local_user_id', '1', '本地账户用户ID'),
+('account_local_username', 'admin', '本地账户登录名'),
+('account_local_display_name', '管理员', '本地账户显示名称'),
+('account_local_email', 'admin@example.com', '本地账户邮箱'),
+('account_local_phone', '', '本地账户手机号'),
+('account_local_role', '系统管理员', '本地账户角色'),
+('account_local_password_hash', '', '本地账户密码哈希'),
+('account_local_created_at', '2024-01-01T00:00:00', '本地账户创建时间');
+
+INSERT INTO admin_users (username, display_name, email, phone, role, password_hash, auth_provider, is_active)
+VALUES ('admin', '管理员', 'admin@example.com', '', '系统管理员', '', 'local', TRUE)
+ON DUPLICATE KEY UPDATE
+display_name = VALUES(display_name),
+email = VALUES(email),
+phone = VALUES(phone),
+role = VALUES(role),
+auth_provider = VALUES(auth_provider),
+is_active = VALUES(is_active);
 
 -- 传感器数据由用户通过前端界面添加，不再预置示例数据

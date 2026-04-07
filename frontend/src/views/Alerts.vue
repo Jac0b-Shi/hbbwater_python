@@ -119,7 +119,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useAlertStore } from '../stores/alerts'
 import dayjs from 'dayjs'
@@ -130,6 +130,7 @@ const filterStatus = ref('active')
 const showResolveDialog = ref(false)
 const currentAlert = ref(null)
 const resolveForm = ref({ resolved_by: '' })
+let refreshTimer = null
 
 const filteredAlerts = computed(() => {
   if (filterStatus.value === 'active') {
@@ -189,6 +190,15 @@ const confirmResolve = async () => {
 
 onMounted(() => {
   alertStore.fetchAlerts()
+  refreshTimer = setInterval(() => {
+    alertStore.fetchAlerts()
+  }, 10000)
+})
+
+onUnmounted(() => {
+  if (refreshTimer) {
+    clearInterval(refreshTimer)
+  }
 })
 </script>
 

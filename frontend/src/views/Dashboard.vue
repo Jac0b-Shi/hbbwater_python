@@ -95,10 +95,11 @@
                 {{ row.water_level !== null ? row.water_level.toFixed(1) : '-' }}
               </template>
             </el-table-column>
-            <el-table-column prop="battery_level" label="电量(%)" width="100">
+            <el-table-column label="供电/电量" width="120">
               <template #default="{ row }">
+                <span v-if="row.external_powered">外接供电</span>
                 <el-progress 
-                  v-if="row.battery_level !== null"
+                  v-else-if="row.battery_level !== null"
                   :percentage="Math.round(row.battery_level)"
                   :color="getBatteryColor"
                   :show-text="false"
@@ -269,10 +270,10 @@ const refreshStatus = async () => {
 
 onMounted(async () => {
   await dashboardStore.refreshAll()
-  // Auto refresh every 30 seconds
+  // Auto refresh every 5 seconds for near real-time updates
   refreshInterval = setInterval(() => {
     dashboardStore.refreshAll()
-  }, 30000)
+  }, 5000)
 })
 
 onUnmounted(() => {

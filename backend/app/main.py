@@ -6,7 +6,9 @@ from datetime import datetime
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.routers import sensors, alerts, dashboard, config
+from app.database import Base, engine
+from app.routers import sensors, alerts, dashboard, config, account
+from app.services.schema import ensure_runtime_schema
 
 
 @asynccontextmanager
@@ -14,6 +16,9 @@ async def lifespan(app: FastAPI):
     """Application lifespan handler."""
     # Startup
     print(f"[{datetime.utcnow()}] Flood Monitoring API starting up...")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+        await ensure_runtime_schema(conn)
     yield
     # Shutdown
     print(f"[{datetime.utcnow()}] Flood Monitoring API shutting down...")
@@ -68,6 +73,7 @@ app.include_router(sensors.router, prefix="/api")
 app.include_router(alerts.router, prefix="/api")
 app.include_router(dashboard.router, prefix="/api")
 app.include_router(config.router, prefix="/api")
+app.include_router(account.router, prefix="/api")
 
 
 if __name__ == "__main__":
