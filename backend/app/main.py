@@ -1,10 +1,12 @@
 """FastAPI main application."""
+import asyncio
 import os
 from contextlib import asynccontextmanager
 from datetime import datetime
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.exc import OperationalError
 
 from app.database import Base, DATABASE_DIALECT, engine, should_auto_create_schema
 from app.routers import sensors, alerts, dashboard, config, account
@@ -16,10 +18,30 @@ async def lifespan(app: FastAPI):
     """Application lifespan handler."""
     # Startup
     print(f"[{datetime.utcnow()}] Flood Monitoring API starting up...")
-    async with engine.begin() as conn:
-        if should_auto_create_schema(DATABASE_DIALECT):
-            await conn.run_sync(Base.metadata.create_all)
-        await ensure_runtime_schema(conn)
+    max_attempts = int(os.getenv("DB_STARTUP_MAX_ATTEMPTS", "10"))
+    retry_delay = float(os.getenv("DB_STARTUP_RETRY_DELAY_SECONDS", "3"))
+
+    last_error: OperationalError | None = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            async with engine.begin() as conn:
+                if should_auto_create_schema(DATABASE_DIALECT):
+                    await conn.run_sync(Base.metadata.create_all)
+                await ensure_runtime_schema(conn)
+            last_error = None
+            break
+        except OperationalError as exc:
+            last_error = exc
+            if attempt == max_attempts:
+                raise
+            print(
+                f"[{datetime.utcnow()}] Database unavailable during startup "
+                f"(attempt {attempt}/{max_attempts}), retrying in {retry_delay}s..."
+            )
+            await asyncio.sleep(retry_delay)
+
+    if last_error is not None:
+        raise last_error
     yield
     # Shutdown
     print(f"[{datetime.utcnow()}] Flood Monitoring API shutting down...")
