@@ -12,7 +12,15 @@ if BACKEND_ROOT not in sys.path:
 IMPORT_ERROR = None
 
 try:
-    from app.database import build_database_url, get_database_backend_name, should_auto_create_schema
+    from app.database import (
+        build_business_database_settings_from_env,
+        build_database_connect_args,
+        build_database_url,
+        build_control_database_settings_from_env,
+        get_database_backend_name,
+        render_database_url,
+        should_auto_create_schema,
+    )
     from app.models import SensorType
     from app.routers.sensors import (
         generate_webhook_token,
@@ -76,6 +84,68 @@ class SmokeTests(unittest.TestCase):
             clear=False,
         ):
             self.assertEqual(build_database_url(), "sqlite+aiosqlite:///./tmp/test.db")
+
+    def test_build_database_url_supports_dm_service_name(self):
+        with patch.dict(
+            os.environ,
+            {
+                "DATABASE_URL": "",
+                "DB_DIALECT": "dm",
+                "DB_DRIVER": "dmAsync",
+                "DB_SERVICE_NAME": "DM_CLUSTER",
+                "DB_PORT": "",
+                "DB_NAME": "unit_business_db",
+                "DB_USER": "unit_service_user",
+                "DB_PASSWORD": "Secret123",
+            },
+            clear=False,
+        ):
+            self.assertEqual(
+                build_database_url(),
+                "dm+dmAsync://unit_service_user:Secret123@DM_CLUSTER/unit_business_db",
+            )
+
+    def test_build_control_database_settings_reads_control_prefix(self):
+        with patch.dict(
+            os.environ,
+            {
+                "CONTROL_DATABASE_URL": "sqlite+aiosqlite:///./runtime/control-test.db",
+            },
+            clear=False,
+        ):
+            settings = build_control_database_settings_from_env()
+            self.assertEqual(
+                render_database_url(settings),
+                "sqlite+aiosqlite:///./runtime/control-test.db",
+            )
+
+    def test_build_business_database_settings_reads_business_prefix(self):
+        with patch.dict(
+            os.environ,
+            {
+                "BUSINESS_DATABASE_URL": "",
+                "BUSINESS_DB_DIALECT": "mysql",
+                "BUSINESS_DB_DRIVER": "aiomysql",
+                "BUSINESS_DB_HOST": "db.internal",
+                "BUSINESS_DB_PORT": "3307",
+                "BUSINESS_DB_NAME": "monitoring_prod",
+                "BUSINESS_DB_USER": "svc_user",
+                "BUSINESS_DB_PASSWORD": "Secret123",
+            },
+            clear=False,
+        ):
+            settings = build_business_database_settings_from_env()
+            self.assertEqual(
+                render_database_url(settings),
+                "mysql+aiomysql://svc_user:Secret123@db.internal:3307/monitoring_prod",
+            )
+
+    def test_build_database_connect_args_supports_dm_service_config_path(self):
+        with patch.dict(os.environ, {"DM_SVC_PATH": r"C:\Windows\System32"}, clear=False):
+            self.assertEqual(
+                build_database_connect_args("dm"),
+                {"dmsvc_path": r"C:\Windows\System32"},
+            )
 
     def test_should_auto_create_schema_defaults_to_false_for_dm(self):
         with patch.dict(os.environ, {}, clear=False):

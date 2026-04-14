@@ -1,6 +1,6 @@
 # 校园水浸监测数据存储与可视化系统
 
-基于MySQL分级存储、Headscale安全组网、Vue+WordPress前后端分离的完整技术解决方案。
+基于双数据库分层存储、Vue + WordPress 前后端分离的完整技术方案。
 
 ## 系统架构
 
@@ -26,13 +26,12 @@
 │  :8000          │  │   /wp           │  │  :8080          │
 └────────┬────────┘  └─────────────────┘  └────────┬────────┘
          │                                          │
-         │    ┌─────────────────────────────────┐   │
-         └───►│       MySQL 8.0 数据库           │◄──┘
-              │  - sensor_readings (热数据)      │
-              │  - sensor_readings_archive (归档)│
-              │  - sensor_summary_* (汇总)       │
-              │  - alerts (告警)                 │
-              └─────────────────────────────────┘
+         │    ┌─────────────────┐  ┌────────────────────────────┐   │
+         └───►│ 控制库 SQLite   │  │ 业务库 MySQL / 达梦        │◄──┘
+              │ admin_users     │  │ sensor_readings            │
+              │ system_config   │  │ sensor_readings_archive    │
+              │ business profiles│ │ sensor_summary_* / alerts  │
+              └─────────────────┘  └────────────────────────────┘
 ```
 
 ## 项目结构
@@ -212,11 +211,19 @@ caddy run --config Caddyfile
 ### 后端环境变量 (.env)
 
 ```bash
-DB_HOST=localhost
-DB_PORT=3306
-DB_NAME=flood_monitoring
-DB_USER=flood_user
-DB_PASSWORD=flood_monitoring_2025
+CONTROL_DATABASE_URL=sqlite+aiosqlite:///./runtime/control.db
+
+BUSINESS_DB_HOST=localhost
+BUSINESS_DB_PORT=3306
+BUSINESS_DB_NAME=flood_monitoring
+BUSINESS_DB_USER=flood_user
+BUSINESS_DB_PASSWORD=flood_monitoring_2025
+
+# 达梦服务名模式可改为：
+# BUSINESS_DB_DIALECT=dm
+# BUSINESS_DB_DRIVER=dmAsync
+# BUSINESS_DB_SERVICE_NAME=DM_CLUSTER
+# BUSINESS_DM_SVC_PATH=C:\Windows\System32
 
 API_HOST=0.0.0.0
 API_PORT=8000

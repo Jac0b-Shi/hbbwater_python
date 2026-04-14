@@ -7,7 +7,7 @@ from sqlalchemy import select, func, desc, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.database import get_db
+from app.database import get_control_db, get_db
 from app.models import Sensor, SensorReading, SensorType, ReportMethod, WebhookGroup
 from app.schemas import (
     SensorCreate, SensorUpdate, SensorResponse,
@@ -467,14 +467,17 @@ async def receive_sensor_data(data: SensorDataInput, db: AsyncSession = Depends(
 
 
 @router.get("/status/all", response_model=List[SensorStatus])
-async def get_all_sensors_status(db: AsyncSession = Depends(get_db)):
+async def get_all_sensors_status(
+    db: AsyncSession = Depends(get_db),
+    control_db: AsyncSession = Depends(get_control_db),
+):
     """Get current status of all sensors."""
     # Get all sensors with their latest reading
     query = select(Sensor).where(Sensor.is_active == True)
     result = await db.execute(query)
     sensors = result.scalars().all()
     
-    offline_timeout_minutes = await get_offline_timeout_minutes(db)
+    offline_timeout_minutes = await get_offline_timeout_minutes(control_db)
     offline_threshold = datetime.utcnow() - timedelta(minutes=offline_timeout_minutes)
     statuses = []
     

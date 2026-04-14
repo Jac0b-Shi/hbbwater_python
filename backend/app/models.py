@@ -19,7 +19,7 @@ from sqlalchemy import (
 from sqlalchemy.types import TypeDecorator
 from sqlalchemy.orm import relationship
 
-from app.database import Base
+from app.database import BusinessBase, ControlBase
 
 
 class SensorType(str, enum.Enum):
@@ -79,7 +79,7 @@ class JSONText(TypeDecorator):
             return value
 
 
-class Sensor(Base):
+class Sensor(BusinessBase):
     __tablename__ = "sensors"
     
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -116,7 +116,7 @@ class Sensor(Base):
         return self.webhook_group_token
 
 
-class WebhookGroup(Base):
+class WebhookGroup(BusinessBase):
     __tablename__ = "webhook_groups"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -130,7 +130,7 @@ class WebhookGroup(Base):
     sensors = relationship("Sensor", back_populates="webhook_group")
 
 
-class SensorReading(Base):
+class SensorReading(BusinessBase):
     __tablename__ = "sensor_readings"
     
     id = Column(BigInteger, primary_key=True, autoincrement=True)
@@ -165,7 +165,7 @@ class SensorReading(Base):
     )
 
 
-class Alert(Base):
+class Alert(BusinessBase):
     __tablename__ = "alerts"
     
     id = Column(BigInteger, primary_key=True, autoincrement=True)
@@ -191,7 +191,7 @@ class Alert(Base):
     )
 
 
-class SystemConfig(Base):
+class SystemConfig(ControlBase):
     __tablename__ = "system_config"
     
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -201,7 +201,7 @@ class SystemConfig(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
-class AdminUser(Base):
+class AdminUser(ControlBase):
     __tablename__ = "admin_users"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
@@ -214,5 +214,29 @@ class AdminUser(Base):
     auth_provider = Column(String(32), default="local")
     external_subject = Column(String(128), nullable=True, index=True)
     is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class BusinessDbProfile(ControlBase):
+    __tablename__ = "business_db_profiles"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    profile_key = Column(String(64), unique=True, nullable=False, index=True)
+    display_name = Column(String(100), nullable=False)
+    dialect = Column(String(20), nullable=False)
+    driver = Column(String(50), nullable=False)
+    host = Column(String(255), default="")
+    port = Column(String(16), default="")
+    service_name = Column(String(128), default="")
+    database_name = Column(String(255), nullable=False)
+    username = Column(String(255), nullable=False)
+    password = Column(Text, default="")
+    dm_home = Column(String(255), default="")
+    dm_svc_path = Column(String(255), default="")
+    auto_create_schema = Column(Boolean, default=False)
+    is_active = Column(Boolean, default=False, index=True)
+    last_tested_at = Column(DateTime, nullable=True)
+    last_error = Column(Text, default="")
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

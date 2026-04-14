@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select, func, desc, and_, case
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_db
+from app.database import get_control_db, get_db
 from app.models import Sensor, SensorReading, Alert, SensorType
 from app.schemas import DashboardStats, SensorStatus
 from app.services.system_config import get_offline_timeout_minutes
@@ -16,7 +16,10 @@ router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
 
 @router.get("/stats", response_model=DashboardStats)
-async def get_dashboard_stats(db: AsyncSession = Depends(get_db)):
+async def get_dashboard_stats(
+    db: AsyncSession = Depends(get_db),
+    control_db: AsyncSession = Depends(get_control_db),
+):
     """Get dashboard statistics."""
     # Total sensors
     total_result = await db.execute(select(func.count()).select_from(Sensor))
@@ -45,7 +48,7 @@ async def get_dashboard_stats(db: AsyncSession = Depends(get_db)):
     today_readings = readings_result.scalar()
     
     # Online/offline calculation
-    offline_timeout_minutes = await get_offline_timeout_minutes(db)
+    offline_timeout_minutes = await get_offline_timeout_minutes(control_db)
     offline_threshold = datetime.utcnow() - timedelta(minutes=offline_timeout_minutes)
     
     # Get latest reading time for each sensor
@@ -75,13 +78,16 @@ async def get_dashboard_stats(db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/sensor-status", response_model=List[SensorStatus])
-async def get_all_sensors_status(db: AsyncSession = Depends(get_db)):
+async def get_all_sensors_status(
+    db: AsyncSession = Depends(get_db),
+    control_db: AsyncSession = Depends(get_control_db),
+):
     """Get current status of all sensors."""
     query = select(Sensor).where(Sensor.is_active == True)
     result = await db.execute(query)
     sensors = result.scalars().all()
     
-    offline_timeout_minutes = await get_offline_timeout_minutes(db)
+    offline_timeout_minutes = await get_offline_timeout_minutes(control_db)
     offline_threshold = datetime.utcnow() - timedelta(minutes=offline_timeout_minutes)
     statuses = []
     

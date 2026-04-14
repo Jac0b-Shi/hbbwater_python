@@ -10,6 +10,7 @@
 .env
 .env.local
 .env.*.local
+deploy/dm/dm_svc.conf
 
 # Python
 __pycache__/
@@ -41,6 +42,11 @@ logs/
 # Local tooling/cache
 .playwright-mcp/
 .aiassistant/
+backend/vendor/dm/*
+!backend/vendor/dm/README.md
+backend/dm8_*.iso
+backend/达梦 Python 接口源码-*/
+backend/达梦 PHP_PDO 接口源码-*/
 
 # Temporary captures and notes in project root
 /*.png

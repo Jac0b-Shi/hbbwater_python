@@ -5,7 +5,6 @@ from sqlalchemy import Integer, String, bindparam, inspect, select, table, colum
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from app.database import DATABASE_DIALECT
 from app.models import WebhookGroup
 
 
@@ -160,20 +159,18 @@ async def _sync_legacy_webhook_groups(conn: AsyncConnection) -> None:
         )
 
 
-async def ensure_runtime_schema(conn: AsyncConnection) -> None:
+async def ensure_runtime_schema(conn: AsyncConnection, dialect_name: str) -> None:
     """Add columns/indexes required by newer application versions."""
     existing_tables = await _list_existing_tables(conn)
 
-    if DATABASE_DIALECT == "dm":
+    if dialect_name == "dm":
         required_tables = {
-            "admin_users",
             "alerts",
             "sensor_readings",
             "sensor_readings_archive",
             "sensor_summary_daily",
             "sensor_summary_hourly",
             "sensors",
-            "system_config",
             "webhook_groups",
         }
         missing_tables = sorted(required_tables - existing_tables)

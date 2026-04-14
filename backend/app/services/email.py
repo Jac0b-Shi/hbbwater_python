@@ -1,10 +1,14 @@
 """Email service using WordPress mail API."""
-import httpx
 import os
 import warnings
-import urllib3
+from datetime import datetime
 from typing import Optional
+
+import httpx
+import urllib3
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.services.system_config import get_notification_config_values
 
 # 禁用 SSL 警告（内部 Docker 网络中使用 HTTP/禁用验证）
 warnings.filterwarnings("ignore", message="Unverified HTTPS request")
@@ -99,7 +103,7 @@ async def send_test_email_via_wordpress(to: str) -> tuple[bool, str]:
 
 
 async def send_alert_email(
-    db: AsyncSession,
+    control_db: AsyncSession,
     alert_type: str,
     severity: str,
     sensor_name: str,
@@ -110,7 +114,7 @@ async def send_alert_email(
     """Send alert notification email.
     
     Args:
-        db: Database session
+        control_db: Control-plane database session
         alert_type: Type of alert (e.g., 'flood', 'offline')
         severity: Alert severity (e.g., 'critical', 'warning')
         sensor_name: Name of the sensor
@@ -121,17 +125,15 @@ async def send_alert_email(
     Returns:
         tuple: (success: bool, message: str)
     """
-    from app.routers.config import get_notification_config
-    
     # Get notification config
-    config = await get_notification_config(db)
+    config = await get_notification_config_values(control_db)
     
     # Check if email notifications are enabled
-    if not config.email_enabled:
+    if not config["email_enabled"]:
         return False, "邮件通知未启用"
     
     # Determine recipient
-    recipient = to_email or config.smtp_user
+    recipient = to_email or config["smtp_user"]
     if not recipient:
         return False, "未配置收件人邮箱"
     
@@ -186,7 +188,3 @@ async def send_alert_email(
         subject=subject,
         message=email_body
     )
-
-
-# Import datetime here to avoid circular import issues
-from datetime import datetime

@@ -58,6 +58,22 @@ async def get_offline_timeout_minutes(db: AsyncSession, default: int = 60) -> in
     return await get_int_config(db, "offline_timeout_minutes", default)
 
 
+async def get_notification_config_values(db: AsyncSession) -> dict[str, Any]:
+    """Return notification settings, including stored secrets for server-side use."""
+    smtp_password = await get_config_value(db, "smtp_password", "")
+    return {
+        "email_enabled": await get_bool_config(db, "email_enabled", False),
+        "smtp_host": await get_config_value(db, "smtp_host", ""),
+        "smtp_port": await get_int_config(db, "smtp_port", 587),
+        "smtp_user": await get_config_value(db, "smtp_user", ""),
+        "smtp_password": smtp_password,
+        "smtp_password_set": bool(smtp_password),
+        "smtp_ssl": await get_bool_config(db, "smtp_ssl", True),
+        "webhook_enabled": await get_bool_config(db, "webhook_enabled", False),
+        "webhook_url": await get_config_value(db, "webhook_url", ""),
+    }
+
+
 async def get_database_stats(db: AsyncSession) -> dict[str, int]:
     """Collect record counts for operational tables."""
     tables = {
@@ -86,17 +102,20 @@ def _null_safe_equals(left, right):
     return or_(left == right, and_(left.is_(None), right.is_(None)))
 
 
-async def run_database_maintenance(db: AsyncSession) -> dict[str, Any]:
+async def run_database_maintenance(
+    business_db: AsyncSession,
+    control_db: AsyncSession,
+) -> dict[str, Any]:
     """Move expired hot data into archive and optionally purge old archive data."""
-    retention_days = await get_int_config(db, "data_retention_days", 14)
-    archive_enabled = await get_bool_config(db, "archive_enabled", True)
+    retention_days = await get_int_config(control_db, "data_retention_days", 14)
+    archive_enabled = await get_bool_config(control_db, "archive_enabled", True)
     cutoff = datetime.utcnow() - timedelta(days=retention_days)
 
     archived_rows = 0
     deleted_rows = 0
 
     if archive_enabled:
-        metadata = await _reflect_tables(db, "sensor_readings", "sensor_readings_archive")
+        metadata = await _reflect_tables(business_db, "sensor_readings", "sensor_readings_archive")
         sensor_readings = metadata.tables["sensor_readings"]
         sensor_readings_archive = metadata.tables["sensor_readings_archive"]
         archive_column_names = [
@@ -143,17 +162,19 @@ async def run_database_maintenance(db: AsyncSession) -> dict[str, Any]:
                 )
             )
         )
-        insert_result = await db.execute(
+        insert_result = await business_db.execute(
             insert(sensor_readings_archive).from_select(archive_column_names, source_select)
         )
         archived_rows = int(insert_result.rowcount or 0)
 
-    metadata = await _reflect_tables(db, "sensor_readings")
+    metadata = await _reflect_tables(business_db, "sensor_readings")
     sensor_readings = metadata.tables["sensor_readings"]
-    delete_result = await db.execute(delete(sensor_readings).where(sensor_readings.c.recorded_at < cutoff))
+    delete_result = await business_db.execute(
+        delete(sensor_readings).where(sensor_readings.c.recorded_at < cutoff)
+    )
     deleted_rows = int(delete_result.rowcount or 0)
 
-    await db.commit()
+    await business_db.commit()
 
     return {
         "retention_days": retention_days,
@@ -161,7 +182,7 @@ async def run_database_maintenance(db: AsyncSession) -> dict[str, Any]:
         "cutoff": cutoff.isoformat(),
         "archived_rows": archived_rows,
         "deleted_rows": deleted_rows,
-        "stats": await get_database_stats(db),
+        "stats": await get_database_stats(business_db),
     }
 
 
@@ -174,7 +195,6 @@ async def optimize_database_tables(db: AsyncSession) -> dict[str, Any]:
         "sensor_summary_hourly",
         "sensor_summary_daily",
         "alerts",
-        "system_config",
     ]
     results = []
 

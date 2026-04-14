@@ -73,9 +73,11 @@ DB_PASSWORD=你的新密码
 MYSQL_ROOT_PASSWORD=root新密码
 ```
 
+如果你要把后端改连外部达梦，不要改这两个值，改 `BACKEND_DB_*` / `BACKEND_DM_*`；控制库 SQLite 由 `BACKEND_CONTROL_DATABASE_URL` 指向容器内的 `sqlite+aiosqlite:////app/runtime/control.db`。
+
 **Q: 数据会丢失吗？**
 
-A: 数据保存在 Docker Volume 中，重启不会丢失。如需完全清理，使用 `docker compose down -v`。
+A: MySQL、WordPress 和控制库 SQLite 都保存在 Docker Volume 中，重启不会丢失。如需完全清理，使用 `docker compose down -v`。
 
 ## 详细文档
 

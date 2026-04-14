@@ -18,6 +18,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # 复制应用代码
 COPY app/ ./app/
+RUN mkdir -p /app/runtime
 
 # 暴露端口
 EXPOSE 8000

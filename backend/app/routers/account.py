@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_db
+from app.database import get_control_db
 from app.services.account import account_service
 
 router = APIRouter(prefix="/account", tags=["account"])
@@ -59,7 +59,7 @@ class AdminUserCreate(BaseModel):
 @router.get("/me", response_model=AccountProfileResponse)
 async def get_current_account(
     x_account_username: Optional[str] = Header(default=None),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_control_db),
 ):
     """Get current account profile."""
     profile = await account_service.get_profile(db, username=x_account_username)
@@ -70,7 +70,7 @@ async def get_current_account(
 async def update_current_account(
     payload: AccountProfileUpdate,
     x_account_username: Optional[str] = Header(default=None),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_control_db),
 ):
     """Update current account profile."""
     cleaned_payload = payload.model_dump()
@@ -85,7 +85,7 @@ async def update_current_account(
 async def change_current_password(
     payload: PasswordChangeRequest,
     x_account_username: Optional[str] = Header(default=None),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_control_db),
 ):
     """Change current account password."""
     if payload.current_password == payload.new_password:
@@ -96,13 +96,13 @@ async def change_current_password(
 
 
 @router.get("/providers")
-async def get_account_providers(db: AsyncSession = Depends(get_db)):
+async def get_account_providers(db: AsyncSession = Depends(get_control_db)):
     """List supported account providers for future auth integrations."""
     return await account_service.get_provider_catalog(db)
 
 
 @router.get("/admin-users", response_model=list[AdminUserResponse])
-async def list_admin_users(db: AsyncSession = Depends(get_db)):
+async def list_admin_users(db: AsyncSession = Depends(get_control_db)):
     """List local admin users as the basis for multi-admin expansion."""
     users = await account_service.list_users(db)
     return [AdminUserResponse(**user) for user in users]
@@ -111,7 +111,7 @@ async def list_admin_users(db: AsyncSession = Depends(get_db)):
 @router.post("/admin-users", response_model=AdminUserResponse, status_code=201)
 async def create_admin_user(
     payload: AdminUserCreate,
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_control_db),
 ):
     """Create a local admin user."""
     user = await account_service.create_user(db, payload.model_dump())

@@ -1,7 +1,6 @@
 <template>
   <div class="settings-page">
     <el-row :gutter="20">
-      <!-- System Settings -->
       <el-col :xs="24" :md="12">
         <el-card shadow="hover">
           <template #header>
@@ -33,7 +32,6 @@
         </el-card>
       </el-col>
 
-      <!-- Notification Settings -->
       <el-col :xs="24" :md="12">
         <el-card shadow="hover">
           <template #header>
@@ -51,9 +49,9 @@
               <el-input-number v-model="notifyConfig.smtp_port" :min="1" :max="65535" />
             </el-form-item>
             <el-form-item label="发件人邮箱">
-              <el-input 
-                v-model="notifyConfig.smtp_user" 
-                placeholder="alert@example.com" 
+              <el-input
+                v-model="notifyConfig.smtp_user"
+                placeholder="alert@example.com"
                 autocomplete="off"
                 name="smtp-user-config"
                 data-lpignore="true"
@@ -62,9 +60,9 @@
               />
             </el-form-item>
             <el-form-item label="SMTP密码/授权码">
-              <el-input 
+              <el-input
                 :key="smtpPasswordFieldKey"
-                v-model="smtpPasswordDraft" 
+                v-model="smtpPasswordDraft"
                 type="password"
                 show-password
                 :placeholder="notifyConfig.smtp_password_set ? '已保存授权码；如需更新，请输入新的授权码' : '邮箱授权码或密码'"
@@ -79,18 +77,24 @@
               <el-button link type="danger" @click="clearSmtpPassword">清空已保存密码</el-button>
             </el-form-item>
             <el-form-item label="使用SSL/TLS">
-              <el-switch v-model="notifyConfig.smtp_ssl" />
+              <el-switch v-model="notifyConfig.smtp_ssl" @change="handleSmtpSslChange" />
               <span class="form-hint">{{ notifyConfig.smtp_ssl ? 'SSL加密（推荐）' : '明文传输' }}</span>
             </el-form-item>
             <el-form-item label="测试邮箱">
-              <el-input 
-                v-model="testEmailAddress" 
-                placeholder="接收测试邮件的邮箱地址" 
-              />
+              <el-input v-model="testEmailAddress" placeholder="接收测试邮件的邮箱地址" />
             </el-form-item>
             <el-form-item>
-              <el-button type="primary" @click="testEmail" :disabled="!notifyConfigReady || !notifyConfig.email_enabled || !testEmailAddress.trim()" :loading="testingEmail">测试邮件</el-button>
-              <el-button @click="saveNotifyConfig" :disabled="!notifyConfigReady" :loading="savingNotifyConfig">保存配置</el-button>
+              <el-button
+                type="primary"
+                @click="testEmail"
+                :disabled="!notifyConfigReady || !notifyConfig.email_enabled || !testEmailAddress.trim()"
+                :loading="testingEmail"
+              >
+                测试邮件
+              </el-button>
+              <el-button @click="saveNotifyConfig" :disabled="!notifyConfigReady" :loading="savingNotifyConfig">
+                保存配置
+              </el-button>
             </el-form-item>
             <el-divider />
             <el-form-item label="Webhook通知">
@@ -100,19 +104,146 @@
               <el-input v-model="notifyConfig.webhook_url" placeholder="https://example.com/webhook" />
             </el-form-item>
             <el-form-item>
-              <el-button type="primary" @click="testWebhook" :disabled="!notifyConfig.webhook_enabled || !notifyConfig.webhook_url.trim()">测试 Webhook</el-button>
+              <el-button type="primary" @click="testWebhook" :disabled="!notifyConfig.webhook_enabled || !notifyConfig.webhook_url.trim()">
+                测试 Webhook
+              </el-button>
             </el-form-item>
           </el-form>
         </el-card>
       </el-col>
     </el-row>
 
-    <!-- Database Stats -->
     <el-row :gutter="20" class="mt-4">
       <el-col :span="24">
         <el-card shadow="hover">
           <template #header>
-            <span>数据库统计</span>
+            <div class="card-header-inline">
+              <span>业务数据库</span>
+              <el-tag :type="runtimeTagType">{{ businessDbState.runtime.display_name || '未配置' }}</el-tag>
+            </div>
+          </template>
+
+          <el-alert
+            title="管理员、通知配置和数据库 profile 固定保存在本地控制库 SQLite；传感器、读数、告警和统计数据写入当前激活的业务数据库。"
+            type="info"
+            show-icon
+            :closable="false"
+            class="mb-4"
+          />
+
+          <div class="profile-toolbar">
+            <el-select
+              v-model="selectedBusinessProfileId"
+              placeholder="选择已有业务数据库配置"
+              class="profile-select"
+              :disabled="!businessDbState.profiles.length"
+            >
+              <el-option
+                v-for="profile in businessDbState.profiles"
+                :key="profile.id"
+                :label="profile.display_name + (profile.is_active ? '（当前）' : '')"
+                :value="profile.id"
+              />
+            </el-select>
+            <el-button @click="startNewBusinessProfile">新建配置</el-button>
+          </div>
+
+          <el-descriptions :column="4" border class="mb-4">
+            <el-descriptions-item label="当前业务库">{{ businessDbState.runtime.display_name || '未配置' }}</el-descriptions-item>
+            <el-descriptions-item label="方言">{{ businessDbState.runtime.dialect || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="数据库名">{{ businessDbState.runtime.database || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="连接方式">{{ runtimeConnectionText }}</el-descriptions-item>
+          </el-descriptions>
+
+          <el-form :model="businessProfileForm" label-width="150px">
+            <el-form-item label="配置名称">
+              <el-input v-model="businessProfileForm.display_name" placeholder="例如：本地 MySQL / 单位达梦集群" />
+            </el-form-item>
+            <el-form-item label="数据库类型">
+              <el-select v-model="businessProfileForm.dialect">
+                <el-option label="MySQL" value="mysql" />
+                <el-option label="达梦 DM8" value="dm" />
+                <el-option label="SQLite" value="sqlite" />
+              </el-select>
+              <span class="form-hint">控制库仍固定使用 SQLite，这里配置的是业务库</span>
+            </el-form-item>
+            <el-form-item label="驱动">
+              <el-input v-model="businessProfileForm.driver" placeholder="如 aiomysql / dmAsync / aiosqlite" />
+            </el-form-item>
+            <el-form-item v-if="businessProfileForm.dialect !== 'sqlite'" label="主机地址">
+              <el-input v-model="businessProfileForm.host" :placeholder="businessProfileForm.dialect === 'mysql' ? 'mysql 或 127.0.0.1' : '达梦单实例地址，可留空改用服务名'" />
+            </el-form-item>
+            <el-form-item v-if="businessProfileForm.dialect !== 'sqlite'" label="端口">
+              <el-input v-model="businessProfileForm.port" :placeholder="businessProfileForm.dialect === 'mysql' ? '3306' : '5236'" />
+            </el-form-item>
+            <el-form-item v-if="businessProfileForm.dialect === 'dm'" label="服务名">
+              <el-input v-model="businessProfileForm.service_name" placeholder="例如 DM_CLUSTER；填写后优先走 dm_svc.conf 服务名连接" />
+              <span class="form-hint">单位集群模式建议填写服务名，并同时配置 DM_SVC_PATH</span>
+            </el-form-item>
+            <el-form-item label="数据库名">
+              <el-input v-model="businessProfileForm.database_name" placeholder="业务库名" />
+            </el-form-item>
+            <el-form-item v-if="businessProfileForm.dialect !== 'sqlite'" label="用户名">
+              <el-input v-model="businessProfileForm.username" placeholder="数据库用户名" />
+            </el-form-item>
+            <el-form-item v-if="businessProfileForm.dialect !== 'sqlite'" label="密码">
+              <el-input
+                :key="businessPasswordFieldKey"
+                v-model="businessPasswordDraft"
+                type="password"
+                show-password
+                :placeholder="businessProfileForm.password_set ? '已保存密码；如需更新，请输入新的密码' : '数据库密码'"
+                autocomplete="off"
+                clearable
+              />
+              <span class="form-hint">{{ businessPasswordHint }}</span>
+              <el-button
+                v-if="businessProfileForm.id && businessProfileForm.password_set"
+                link
+                type="danger"
+                @click="clearBusinessProfilePassword"
+              >
+                清空已保存密码
+              </el-button>
+            </el-form-item>
+            <el-form-item v-if="businessProfileForm.dialect === 'dm'" label="DM_HOME">
+              <el-input v-model="businessProfileForm.dm_home" placeholder="例如 /opt/dmdbms 或 D:\\Program Files\\dmdbms" />
+            </el-form-item>
+            <el-form-item v-if="businessProfileForm.dialect === 'dm'" label="DM_SVC_PATH">
+              <el-input v-model="businessProfileForm.dm_svc_path" placeholder="例如 /etc 或 C:\\Windows\\System32" />
+            </el-form-item>
+            <el-form-item label="自动建表">
+              <el-switch v-model="businessProfileForm.auto_create_schema" />
+              <span class="form-hint">达梦建议关闭并先执行 `database/dm/init.sql`</span>
+            </el-form-item>
+            <el-form-item v-if="businessProfileForm.last_tested_at" label="最近测试">
+              <span>{{ formatDateTime(businessProfileForm.last_tested_at) }}</span>
+            </el-form-item>
+            <el-form-item v-if="businessProfileForm.last_error" label="最近错误">
+              <el-text type="danger">{{ businessProfileForm.last_error }}</el-text>
+            </el-form-item>
+            <el-form-item>
+              <el-button type="primary" :loading="savingBusinessProfile" @click="saveBusinessProfile">保存配置</el-button>
+              <el-button :loading="testingBusinessProfile" @click="testBusinessProfile">测试连接</el-button>
+              <el-button
+                type="success"
+                :loading="activatingBusinessProfile"
+                :disabled="!businessProfileForm.id"
+                @click="activateBusinessProfile"
+              >
+                应用切换
+              </el-button>
+            </el-form-item>
+          </el-form>
+        </el-card>
+      </el-col>
+    </el-row>
+
+    <el-row :gutter="20" class="mt-4">
+      <el-col :span="24">
+        <el-card shadow="hover">
+          <template #header>
+            <span>业务数据库统计</span>
           </template>
           <el-descriptions :column="4" border>
             <el-descriptions-item label="热数据表">{{ dbStats.readings_count?.toLocaleString() }} 条</el-descriptions-item>
@@ -121,13 +252,13 @@
             <el-descriptions-item label="日汇总">{{ dbStats.daily_count?.toLocaleString() }} 条</el-descriptions-item>
           </el-descriptions>
           <div class="db-actions">
-            <el-tooltip content="按保留策略归档并清理过期热数据" placement="top">
+            <el-tooltip content="按控制库中的保留策略归档并清理过期热数据" placement="top">
               <el-button type="primary" :loading="maintenanceLoading" @click="runMaintenance">
                 <el-icon><Tools /></el-icon>执行维护任务
               </el-button>
             </el-tooltip>
-            <el-tooltip content="执行 MySQL OPTIMIZE TABLE，可能需要较长时间" placement="top">
-              <el-button type="warning" :loading="optimizeLoading" @click="optimizeTables">
+            <el-tooltip :content="optimizeTooltip" placement="top">
+              <el-button type="warning" :loading="optimizeLoading" :disabled="!optimizeSupported" @click="optimizeTables">
                 <el-icon><Rank /></el-icon>优化数据表
               </el-button>
             </el-tooltip>
@@ -136,7 +267,6 @@
       </el-col>
     </el-row>
 
-    <!-- System Info -->
     <el-row :gutter="20" class="mt-4">
       <el-col :span="24">
         <el-card shadow="hover">
@@ -146,7 +276,10 @@
           <el-descriptions :column="3" border>
             <el-descriptions-item label="系统版本">v1.0.0</el-descriptions-item>
             <el-descriptions-item label="API版本">v1</el-descriptions-item>
-            <el-descriptions-item label="数据库">MySQL 8.0</el-descriptions-item>
+            <el-descriptions-item label="控制库">SQLite</el-descriptions-item>
+            <el-descriptions-item label="当前业务库">{{ businessDbState.runtime.display_name || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="业务库方言">{{ businessDbState.runtime.dialect || '-' }}</el-descriptions-item>
+            <el-descriptions-item label="业务库目标">{{ runtimeDatabaseTarget }}</el-descriptions-item>
             <el-descriptions-item label="后端">FastAPI</el-descriptions-item>
             <el-descriptions-item label="前端">Vue 3 + Element Plus</el-descriptions-item>
             <el-descriptions-item label="Web服务器">Caddy</el-descriptions-item>
@@ -158,7 +291,8 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
+import dayjs from 'dayjs'
 import { ElMessage } from 'element-plus'
 import axios from 'axios'
 
@@ -186,24 +320,26 @@ const savingNotifyConfig = ref(false)
 const testingEmail = ref(false)
 const smtpPasswordDraft = ref('')
 const smtpPasswordFieldKey = ref(0)
-
-const smtpPasswordHint = computed(() => {
-  if (smtpPasswordDraft.value.trim()) {
-    return '将使用新的授权码覆盖当前已保存值'
-  }
-  return notifyConfig.value.smtp_password_set ? '授权码已保存在服务器端；留空则保持不变' : '尚未保存授权码'
-})
-
-const resetSmtpPasswordDraft = () => {
-  smtpPasswordDraft.value = ''
-  smtpPasswordFieldKey.value += 1
-}
-
-watch(() => notifyConfig.value.smtp_ssl, (val) => {
-  notifyConfig.value.smtp_port = val ? 465 : 587
-})
-
 const testEmailAddress = ref('')
+
+const businessDbState = ref({
+  active_profile_id: null,
+  runtime: {
+    display_name: '',
+    dialect: '',
+    database: '',
+    host: '',
+    service_name: ''
+  },
+  profiles: []
+})
+
+const selectedBusinessProfileId = ref(null)
+const savingBusinessProfile = ref(false)
+const testingBusinessProfile = ref(false)
+const activatingBusinessProfile = ref(false)
+const businessPasswordDraft = ref('')
+const businessPasswordFieldKey = ref(0)
 
 const dbStats = ref({
   readings_count: 0,
@@ -214,6 +350,165 @@ const dbStats = ref({
 
 const maintenanceLoading = ref(false)
 const optimizeLoading = ref(false)
+
+const defaultBusinessProfileForm = () => ({
+  id: null,
+  profile_key: '',
+  display_name: '',
+  dialect: 'mysql',
+  driver: 'aiomysql',
+  host: 'mysql',
+  port: '3306',
+  service_name: '',
+  database_name: 'flood_monitoring',
+  username: 'flood_user',
+  password_set: false,
+  dm_home: '',
+  dm_svc_path: '',
+  auto_create_schema: false,
+  is_active: false,
+  last_tested_at: '',
+  last_error: ''
+})
+
+const businessProfileForm = ref(defaultBusinessProfileForm())
+
+const smtpPasswordHint = computed(() => {
+  if (smtpPasswordDraft.value.trim()) {
+    return '将使用新的授权码覆盖当前已保存值'
+  }
+  return notifyConfig.value.smtp_password_set ? '授权码已保存在服务器端；留空则保持不变' : '尚未保存授权码'
+})
+
+const businessPasswordHint = computed(() => {
+  if (businessPasswordDraft.value.trim()) {
+    return '将使用新的数据库密码覆盖当前已保存值'
+  }
+  return businessProfileForm.value.password_set ? '密码已保存在服务器端；留空则保持不变' : '尚未保存数据库密码'
+})
+
+const optimizeSupported = computed(() => businessDbState.value.runtime.dialect === 'mysql')
+const optimizeTooltip = computed(() => (
+  optimizeSupported.value
+    ? '执行 MySQL OPTIMIZE TABLE，可能需要较长时间'
+    : `当前业务库为 ${businessDbState.value.runtime.dialect || '未知'}，暂未实现在线优化`
+))
+const runtimeTagType = computed(() => {
+  if (businessDbState.value.runtime.dialect === 'dm') return 'success'
+  if (businessDbState.value.runtime.dialect === 'mysql') return 'warning'
+  return 'info'
+})
+const runtimeConnectionText = computed(() => (
+  businessDbState.value.runtime.service_name
+    ? `服务名 ${businessDbState.value.runtime.service_name}`
+    : (businessDbState.value.runtime.host || '-')
+))
+const runtimeDatabaseTarget = computed(() => {
+  if (businessDbState.value.runtime.service_name) {
+    return `${businessDbState.value.runtime.service_name} / ${businessDbState.value.runtime.database || '-'}`
+  }
+  if (businessDbState.value.runtime.host) {
+    return `${businessDbState.value.runtime.host} / ${businessDbState.value.runtime.database || '-'}`
+  }
+  return businessDbState.value.runtime.database || '-'
+})
+
+const getErrorMessage = (error) => {
+  if (error.response?.data?.detail) return error.response.data.detail
+  if (error.response?.data?.message) return error.response.data.message
+  if (typeof error.response?.data === 'string') return error.response.data
+  if (error.response?.data) return JSON.stringify(error.response.data)
+  return error.message || '未知错误'
+}
+
+const resetSmtpPasswordDraft = () => {
+  smtpPasswordDraft.value = ''
+  smtpPasswordFieldKey.value += 1
+}
+
+const resetBusinessPasswordDraft = () => {
+  businessPasswordDraft.value = ''
+  businessPasswordFieldKey.value += 1
+}
+
+const formatDateTime = (value) => value ? dayjs(value).format('YYYY-MM-DD HH:mm:ss') : '-'
+
+const applyBusinessProfileForm = (profile) => {
+  if (!profile) {
+    businessProfileForm.value = defaultBusinessProfileForm()
+    resetBusinessPasswordDraft()
+    return
+  }
+
+  businessProfileForm.value = {
+    ...defaultBusinessProfileForm(),
+    ...profile
+  }
+  selectedBusinessProfileId.value = profile.id
+  resetBusinessPasswordDraft()
+}
+
+const syncBusinessDatabaseState = (payload) => {
+  businessDbState.value = {
+    active_profile_id: payload.active_profile_id,
+    runtime: payload.runtime || businessDbState.value.runtime,
+    profiles: payload.profiles || []
+  }
+
+  const profiles = businessDbState.value.profiles
+  const preferredProfile =
+    profiles.find(profile => profile.id === selectedBusinessProfileId.value) ||
+    profiles.find(profile => profile.id === payload.active_profile_id) ||
+    profiles[0]
+
+  if (preferredProfile) {
+    applyBusinessProfileForm(preferredProfile)
+  } else {
+    applyBusinessProfileForm(null)
+  }
+}
+
+const buildBusinessProfilePayload = (extra = {}) => {
+  const payload = {
+    id: businessProfileForm.value.id,
+    profile_key: businessProfileForm.value.profile_key || null,
+    display_name: businessProfileForm.value.display_name,
+    dialect: businessProfileForm.value.dialect,
+    driver: businessProfileForm.value.driver || null,
+    host: businessProfileForm.value.host,
+    port: businessProfileForm.value.port,
+    service_name: businessProfileForm.value.service_name,
+    database_name: businessProfileForm.value.database_name,
+    username: businessProfileForm.value.username,
+    dm_home: businessProfileForm.value.dm_home,
+    dm_svc_path: businessProfileForm.value.dm_svc_path,
+    auto_create_schema: businessProfileForm.value.auto_create_schema,
+    ...extra
+  }
+
+  const password = businessPasswordDraft.value.trim()
+  if (password) {
+    payload.password = password
+  }
+
+  return payload
+}
+
+const loadSettings = async () => {
+  const [systemRes, notifyRes, statsRes, businessRes] = await Promise.all([
+    axios.get('/api/config/system'),
+    axios.get('/api/config/notification'),
+    axios.get('/api/config/database/stats'),
+    axios.get('/api/config/business-database')
+  ])
+
+  systemConfig.value = { ...systemConfig.value, ...systemRes.data }
+  notifyConfig.value = { ...notifyConfig.value, ...notifyRes.data }
+  dbStats.value = { ...dbStats.value, ...statsRes.data }
+  syncBusinessDatabaseState(businessRes.data)
+  resetSmtpPasswordDraft()
+  notifyConfigReady.value = true
+}
 
 const saveSystemConfig = async () => {
   try {
@@ -264,12 +559,8 @@ const clearSmtpPassword = async () => {
   }
 }
 
-const getErrorMessage = (error) => {
-  if (error.response?.data?.detail) return error.response.data.detail
-  if (error.response?.data?.message) return error.response.data.message
-  if (typeof error.response?.data === 'string') return error.response.data
-  if (error.response?.data) return JSON.stringify(error.response.data)
-  return error.message || '未知错误'
+const handleSmtpSslChange = (value) => {
+  notifyConfig.value.smtp_port = value ? 465 : 587
 }
 
 const testEmail = async () => {
@@ -295,6 +586,83 @@ const testWebhook = async () => {
     ElMessage.success('测试 Webhook 已发送')
   } catch (error) {
     ElMessage.error('发送失败: ' + getErrorMessage(error))
+  }
+}
+
+const startNewBusinessProfile = () => {
+  selectedBusinessProfileId.value = null
+  applyBusinessProfileForm(null)
+}
+
+const saveBusinessProfile = async () => {
+  savingBusinessProfile.value = true
+  try {
+    const response = await axios.post('/api/config/business-database/profiles', buildBusinessProfilePayload())
+    ElMessage.success(response.data.message || '业务数据库配置已保存')
+    await loadSettings()
+    const profile = response.data.profile
+    if (profile?.id) {
+      selectedBusinessProfileId.value = profile.id
+      applyBusinessProfileForm(profile)
+    }
+  } catch (error) {
+    ElMessage.error('保存失败: ' + getErrorMessage(error))
+  } finally {
+    savingBusinessProfile.value = false
+  }
+}
+
+const clearBusinessProfilePassword = async () => {
+  if (!businessProfileForm.value.id) {
+    return
+  }
+  savingBusinessProfile.value = true
+  try {
+    const response = await axios.post(
+      '/api/config/business-database/profiles',
+      buildBusinessProfilePayload({ clear_password: true })
+    )
+    ElMessage.success(response.data.message || '已清空业务数据库密码')
+    await loadSettings()
+    const profile = response.data.profile
+    if (profile?.id) {
+      selectedBusinessProfileId.value = profile.id
+      applyBusinessProfileForm(profile)
+    }
+  } catch (error) {
+    ElMessage.error('清空失败: ' + getErrorMessage(error))
+  } finally {
+    savingBusinessProfile.value = false
+  }
+}
+
+const testBusinessProfile = async () => {
+  testingBusinessProfile.value = true
+  try {
+    const response = await axios.post('/api/config/business-database/profiles/test', buildBusinessProfilePayload())
+    ElMessage.success(response.data.message || '数据库连接测试成功')
+    await loadSettings()
+  } catch (error) {
+    ElMessage.error('测试失败: ' + getErrorMessage(error))
+  } finally {
+    testingBusinessProfile.value = false
+  }
+}
+
+const activateBusinessProfile = async () => {
+  if (!businessProfileForm.value.id) {
+    ElMessage.warning('请先保存配置，再应用切换')
+    return
+  }
+  activatingBusinessProfile.value = true
+  try {
+    const response = await axios.post(`/api/config/business-database/profiles/${businessProfileForm.value.id}/activate`)
+    ElMessage.success(response.data.message || '业务数据库已切换')
+    await loadSettings()
+  } catch (error) {
+    ElMessage.error('切换失败: ' + getErrorMessage(error))
+  } finally {
+    activatingBusinessProfile.value = false
   }
 }
 
@@ -324,18 +692,46 @@ const optimizeTables = async () => {
   }
 }
 
+watch(() => businessProfileForm.value.dialect, (dialect) => {
+  if (dialect === 'mysql') {
+    if (!businessProfileForm.value.driver || businessProfileForm.value.driver === 'dmAsync' || businessProfileForm.value.driver === 'aiosqlite') {
+      businessProfileForm.value.driver = 'aiomysql'
+    }
+    if (!businessProfileForm.value.port) {
+      businessProfileForm.value.port = '3306'
+    }
+    if (!businessProfileForm.value.host) {
+      businessProfileForm.value.host = 'mysql'
+    }
+  } else if (dialect === 'dm') {
+    if (!businessProfileForm.value.driver || businessProfileForm.value.driver === 'aiomysql' || businessProfileForm.value.driver === 'aiosqlite') {
+      businessProfileForm.value.driver = 'dmAsync'
+    }
+    if (!businessProfileForm.value.port) {
+      businessProfileForm.value.port = '5236'
+    }
+  } else if (dialect === 'sqlite') {
+    businessProfileForm.value.driver = 'aiosqlite'
+    businessProfileForm.value.host = ''
+    businessProfileForm.value.port = ''
+    businessProfileForm.value.service_name = ''
+    businessProfileForm.value.username = ''
+    businessProfileForm.value.dm_home = ''
+    businessProfileForm.value.dm_svc_path = ''
+  }
+})
+
+watch(selectedBusinessProfileId, (profileId) => {
+  if (!profileId) return
+  const profile = businessDbState.value.profiles.find(item => item.id === profileId)
+  if (profile) {
+    applyBusinessProfileForm(profile)
+  }
+})
+
 onMounted(async () => {
   try {
-    const [systemRes, notifyRes, statsRes] = await Promise.all([
-      axios.get('/api/config/system'),
-      axios.get('/api/config/notification'),
-      axios.get('/api/config/database/stats')
-    ])
-    systemConfig.value = { ...systemConfig.value, ...systemRes.data }
-    notifyConfig.value = { ...notifyConfig.value, ...notifyRes.data }
-    dbStats.value = { ...dbStats.value, ...statsRes.data }
-    resetSmtpPasswordDraft()
-    notifyConfigReady.value = true
+    await loadSettings()
   } catch (error) {
     ElMessage.error('加载配置失败: ' + getErrorMessage(error))
   }
@@ -351,14 +747,50 @@ onMounted(async () => {
   margin-top: 20px;
 }
 
+.mb-4 {
+  margin-bottom: 16px;
+}
+
 .form-hint {
   margin-left: 8px;
   color: #909399;
+}
+
+.card-header-inline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.profile-toolbar {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.profile-select {
+  width: 320px;
+  max-width: 100%;
 }
 
 .db-actions {
   margin-top: 20px;
   display: flex;
   gap: 12px;
+}
+
+@media (max-width: 768px) {
+  .profile-toolbar {
+    flex-direction: column;
+  }
+
+  .profile-select {
+    width: 100%;
+  }
+
+  .db-actions {
+    flex-direction: column;
+  }
 }
 </style>

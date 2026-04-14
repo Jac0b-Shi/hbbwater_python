@@ -1,0 +1,11 @@
+TIME_ZONE=(480)
+LANGUAGE=(cn)
+
+# Replace DM_CLUSTER and the node addresses below with the values from your unit.
+DM_CLUSTER=(192.0.2.10:5236,192.0.2.11:5237)
+
+[DM_CLUSTER]
+TIME_ZONE=(+480)
+LOGIN_MODE=(1)
+SWITCH_TIME=(3)
+SWITCH_INTERVAL=(200)

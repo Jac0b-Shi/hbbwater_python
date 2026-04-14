@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, func, desc, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_db
+from app.database import get_control_db, get_db
 from app.models import Alert, Sensor
 from app.schemas import AlertCreate, AlertResponse, AlertResolveRequest
 from app.services.email import send_alert_email
@@ -86,7 +86,11 @@ async def get_alert(alert_id: int, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/", response_model=AlertResponse, status_code=201)
-async def create_alert(alert: AlertCreate, db: AsyncSession = Depends(get_db)):
+async def create_alert(
+    alert: AlertCreate,
+    db: AsyncSession = Depends(get_db),
+    control_db: AsyncSession = Depends(get_control_db),
+):
     """Create a new alert."""
     # Check if sensor exists
     result = await db.execute(select(Sensor).where(Sensor.sensor_id == alert.sensor_id))
@@ -103,7 +107,7 @@ async def create_alert(alert: AlertCreate, db: AsyncSession = Depends(get_db)):
     if alert.severity in ["critical", "warning"]:
         try:
             await send_alert_email(
-                db=db,
+                control_db=control_db,
                 alert_type=alert.alert_type,
                 severity=alert.severity,
                 sensor_name=sensor.sensor_id,

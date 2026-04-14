@@ -36,14 +36,19 @@ services:
     container_name: flood-monitoring-backend
     restart: unless-stopped
     environment:
-      DATABASE_URL: ${DATABASE_URL:-}
-      DB_DIALECT: ${DB_DIALECT:-mysql}
-      DB_DRIVER: ${DB_DRIVER:-aiomysql}
-      DB_HOST: mysql
-      DB_PORT: 3306
-      DB_NAME: ${DB_NAME:-flood_monitoring}
-      DB_USER: ${DB_USER:-flood_user}
-      DB_PASSWORD: ${DB_PASSWORD:-flood_monitoring_2025}
+      CONTROL_DATABASE_URL: ${BACKEND_CONTROL_DATABASE_URL:-sqlite+aiosqlite:////app/runtime/control.db}
+      BUSINESS_DATABASE_URL: ${BACKEND_DATABASE_URL:-}
+      BUSINESS_DB_DIALECT: ${BACKEND_DB_DIALECT:-mysql}
+      BUSINESS_DB_DRIVER: ${BACKEND_DB_DRIVER:-aiomysql}
+      BUSINESS_DB_HOST: ${BACKEND_DB_HOST:-mysql}
+      BUSINESS_DB_PORT: ${BACKEND_DB_PORT:-3306}
+      BUSINESS_DB_NAME: ${BACKEND_DB_NAME:-flood_monitoring}
+      BUSINESS_DB_USER: ${BACKEND_DB_USER:-flood_user}
+      BUSINESS_DB_PASSWORD: ${BACKEND_DB_PASSWORD:-flood_monitoring_2025}
+      BUSINESS_DB_SERVICE_NAME: ${BACKEND_DB_SERVICE_NAME:-}
+      BUSINESS_DM_HOME: ${BACKEND_DM_HOME:-}
+      BUSINESS_DM_SVC_PATH: ${BACKEND_DM_SVC_PATH:-}
+      BUSINESS_AUTO_CREATE_SCHEMA: ${BACKEND_AUTO_CREATE_SCHEMA:-}
       API_HOST: 0.0.0.0
       API_PORT: 8000
       DEBUG: ${DEBUG:-false}
@@ -58,6 +63,8 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
+    volumes:
+      - backend_runtime:/app/runtime
     networks:
       - flood-network
     healthcheck:
@@ -141,6 +148,8 @@ networks:
     driver: bridge
 
 volumes:
+  backend_runtime:
+    driver: local
   mysql_data:
     driver: local
   wordpress_data:

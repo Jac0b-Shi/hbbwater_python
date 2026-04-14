@@ -21,10 +21,12 @@
 └─────────────────┘  └─────────────────┘  └─────────────────┘
                               │
                               ▼
-                    ┌─────────────────┐
-                    │   MySQL 8.0     │
-                    │     :3306       │
-                    └─────────────────┘
+         ┌────────────────────┴────────────────────┐
+         ▼                                         ▼
+┌─────────────────┐                     ┌──────────────────────────┐
+│ 控制库 SQLite   │                     │ 业务库 MySQL / 达梦     │
+│ /app/runtime    │                     │ 默认是 compose 内置库   │
+└─────────────────┘                     └──────────────────────────┘
 ```
 
 ## 环境要求
@@ -75,6 +77,26 @@ docker compose logs -f
 # 停止服务
 docker compose down
 ```
+
+如果后端业务库需要直接接入单位达梦，建议在 Ubuntu 上改用：
+
+```bash
+cp .env.dm.ubuntu.example .env
+docker compose -f docker-compose.yml -f docker-compose.dm.yml up --build -d
+```
+
+前提：
+- Linux 版 DM8 运行时文件已放入 `backend/vendor/dm/`
+- Python 源码使用仓库内的 `backend/达梦 Python 接口源码-20260401/python`
+- 单位下发的 `dm_svc.conf` 已放入 `deploy/dm/dm_svc.conf`
+
+如果你已经在 WSL 的 Ubuntu 中安装了 DM8，例如 `\\wsl$\\ubuntu-22.04\\opt\\dmdbms`，可以先执行：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\backend\scripts\sync_dm_runtime_from_wsl.ps1
+```
+
+这样会把构建 `backend/Dockerfile.dm` 所需的最小 Linux 运行时同步到 `backend/vendor/dm/`。
 
 ### 3. 访问系统
 
@@ -137,11 +159,25 @@ docker compose down -v
 编辑 `.env` 文件修改配置：
 
 ```env
-# 数据库
+# 内置 MySQL / WordPress 数据库
 MYSQL_ROOT_PASSWORD=root_password_2025
 DB_NAME=flood_monitoring
 DB_USER=flood_user
 DB_PASSWORD=flood_monitoring_2025
+
+# 控制库 SQLite（管理员、通知配置、业务库 profile）
+BACKEND_CONTROL_DATABASE_URL=sqlite+aiosqlite:////app/runtime/control.db
+
+# 如果只想把后端业务库切到外部数据库，请改 BACKEND_DB_*，不要改上面的 DB_*
+# BACKEND_DB_DIALECT=dm
+# BACKEND_DB_DRIVER=dmAsync
+# BACKEND_DB_SERVICE_NAME=DM_CLUSTER
+# BACKEND_DB_NAME=YOUR_DB
+# BACKEND_DB_USER=YOUR_DB_USER
+# BACKEND_DB_PASSWORD=ChangeMe_123!
+# BACKEND_DM_HOME=D:\Program Files\dmdbms
+# BACKEND_DM_SVC_PATH=C:\Windows\System32
+# BACKEND_AUTO_CREATE_SCHEMA=false
 
 # API
 DEBUG=false
@@ -156,11 +192,13 @@ WEBHOOK_KEY=your_wechat_webhook_key
 
 ### 数据持久化
 
-MySQL 数据保存在 Docker Volume 中：
+MySQL、WordPress 和控制库 SQLite 都保存在 Docker Volume 中：
 
 ```bash
 # 查看数据卷
 docker volume ls
+
+# 控制库 SQLite 位于 backend_runtime 卷中的 /app/runtime/control.db
 
 # 备份数据库
 docker compose exec mysql mysqldump -uroot -p flood_monitoring > backup.sql
@@ -174,7 +212,7 @@ docker compose exec -i mysql mysql -uroot -p flood_monitoring < backup.sql
 | 服务 | 镜像 | 端口 | 说明 |
 |------|------|------|------|
 | mysql | mysql:8.0 | 3306 | MySQL 数据库 |
-| backend | 本地构建 | 8000 | FastAPI 后端 |
+| backend | 本地构建 | 8000 | FastAPI 后端（控制库 SQLite + 业务库 MySQL/DM） |
 | frontend | 本地构建 | 80 | Vue 前端 |
 | webhook-proxy | 本地构建 | 8080/tcp+udp | Webhook 代理 |
 | caddy | 本地构建 | 80, 8000 | 反向代理 |
@@ -252,6 +290,16 @@ docker compose logs mysql
 
 # 检查数据库是否就绪
 docker compose exec mysql mysqladmin ping -uroot -p
+```
+
+如果业务库已经切到外部达梦，优先检查：
+
+```bash
+# 后端当前配置是否正确注入
+docker compose exec backend env | grep BUSINESS_
+
+# 控制库是否已持久化
+docker compose exec backend ls -l /app/runtime
 ```
 
 ### 容器启动失败
