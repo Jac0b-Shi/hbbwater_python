@@ -10,12 +10,14 @@ ENV DM_HOME=/opt/dmdbms
 ENV DM_PYTHON_SOURCE_ROOT=/opt/dm-python-src
 ENV LD_LIBRARY_PATH=/opt/dmdbms/bin:/opt/dmdbms/drivers/dpi
 
-RUN apt-get update && apt-get install -y \
+RUN sed -i \
+    -e 's|http://deb.debian.org/debian-security|http://mirrors.aliyun.com/debian-security|g' \
+    -e 's|http://deb.debian.org/debian|http://mirrors.aliyun.com/debian|g' \
+    /etc/apt/sources.list.d/debian.sources \
+    && apt-get update && apt-get install -y \
     gcc \
-    g++ \
     make \
-    libaio1 \
-    default-libmysqlclient-dev \
+    libaio1t64 \
     pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
@@ -23,6 +25,9 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY vendor/dm/ ${DM_HOME}/
+RUN if [ -f "${DM_HOME}/bin/libdmgmssl.so" ] && [ ! -e "${DM_HOME}/bin/libgmssl.so" ]; then \
+        ln -s libdmgmssl.so "${DM_HOME}/bin/libgmssl.so"; \
+    fi
 COPY ["达梦 Python 接口源码-20260401/python/", "/opt/dm-python-src/"]
 COPY scripts/install_dm_drivers.sh /tmp/install_dm_drivers.sh
 RUN chmod +x /tmp/install_dm_drivers.sh \

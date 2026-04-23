@@ -183,6 +183,17 @@
           <el-input v-model="sensorForm.description" type="textarea" rows="3" />
         </el-form-item>
         <template v-if="sensorForm.sensor_type === 'ultrasonic'">
+          <el-form-item label="返回单位">
+            <el-select v-model="sensorForm.measurement_unit" style="width: 180px">
+              <el-option
+                v-for="option in measurementUnitOptions"
+                :key="option.value"
+                :label="option.label"
+                :value="option.value"
+              />
+            </el-select>
+            <span class="form-hint">传感器原始上报单位；系统会统一换算为 cm 后入库、展示和告警</span>
+          </el-form-item>
           <el-form-item label="阈值判定">
             <el-select v-model="sensorForm.threshold_condition">
               <el-option
@@ -258,6 +269,7 @@ const sensorForm = ref({
   warning_level: 30,
   danger_level: 50,
   threshold_condition: 'greater_or_equal',
+  measurement_unit: 'cm',
   normal_interval: 1800,
   alert_interval: 300,
   is_active: true,
@@ -291,6 +303,10 @@ const filter = computed(() => route.meta.filter)
 const thresholdConditionOptions = [
   { value: 'greater_or_equal', label: '大于等于阈值触发' },
   { value: 'less_or_equal', label: '小于等于阈值触发' },
+]
+const measurementUnitOptions = [
+  { value: 'cm', label: '厘米 (cm)' },
+  { value: 'mm', label: '毫米 (mm)' },
 ]
 const thresholdConditionHint = computed(() => (
   sensorForm.value.threshold_condition === 'less_or_equal'
@@ -393,6 +409,7 @@ const resetSensorForm = () => {
     warning_level: 30,
     danger_level: 50,
     threshold_condition: 'greater_or_equal',
+    measurement_unit: 'cm',
     normal_interval: 1800,
     alert_interval: 300,
     is_active: true,
@@ -459,6 +476,7 @@ const openSensorDialog = (group = null, sensor = null) => {
       warning_level: sensor.warning_level,
       danger_level: sensor.danger_level,
       threshold_condition: sensor.threshold_condition || 'greater_or_equal',
+      measurement_unit: sensor.measurement_unit || 'cm',
       normal_interval: sensor.normal_interval,
       alert_interval: sensor.alert_interval,
       is_active: sensor.is_active,
@@ -701,6 +719,15 @@ onUnmounted(() => {
 
 .webhook-box .el-input {
   flex: 1;
+}
+
+.form-hint {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  color: #909399;
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .group-sensors {

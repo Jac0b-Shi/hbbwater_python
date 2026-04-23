@@ -4,8 +4,8 @@
       <div class="brand-badge">HBBWATER</div>
       <h1>校园水浸监测系统</h1>
       <p>
-        登录后可按权限访问监控、告警、传感器管理和系统配置。
-        超级管理员负责用户与系统设置，管理员负责传感器，普通用户仅查看。
+        面向校园重点区域的水位与浸水状态集中监控，
+        支持实时查看传感器状态、告警信息和历史趋势。
       </p>
       <div class="brand-points">
         <div class="point-card">
@@ -13,12 +13,12 @@
           <span>统一查看超声波与浸水传感器状态</span>
         </div>
         <div class="point-card">
-          <strong>角色隔离</strong>
-          <span>登录后自动按权限裁剪菜单与操作</span>
+          <strong>异常告警</strong>
+          <span>集中关注水位异常、浸水事件和设备离线</span>
         </div>
         <div class="point-card">
-          <strong>注册校验</strong>
-          <span>新账号通过邮箱验证码完成注册</span>
+          <strong>历史趋势</strong>
+          <span>查看水位变化曲线与传感器上报记录</span>
         </div>
       </div>
     </div>

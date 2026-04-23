@@ -29,6 +29,7 @@ try:
         extract_device_imei,
         extract_water_detected,
         extract_group_water_level,
+        normalize_water_level,
     )
     from app.schemas import GroupWebhookDataInput
     from app.services.account import build_gravatar
@@ -68,6 +69,12 @@ class SmokeTests(unittest.TestCase):
         self.assertTrue(extract_water_detected(payload))
         ultrasonic_payload = GroupWebhookDataInput(sensor_value="128.4")
         self.assertEqual(extract_group_water_level(ultrasonic_payload), 128.4)
+
+    def test_ultrasonic_reading_unit_conversion(self):
+        mm_sensor = SimpleNamespace(measurement_unit="mm")
+        cm_sensor = SimpleNamespace(measurement_unit="cm")
+        self.assertEqual(float(normalize_water_level(mm_sensor, "932")), 93.2)
+        self.assertEqual(float(normalize_water_level(cm_sensor, "93.2")), 93.2)
 
     def test_ultrasonic_status_supports_less_or_equal_thresholds(self):
         sensor = SimpleNamespace(

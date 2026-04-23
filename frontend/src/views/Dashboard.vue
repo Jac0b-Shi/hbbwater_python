@@ -193,7 +193,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useDashboardStore } from '../stores/dashboard'
-import dayjs from 'dayjs'
+import { formatUtc8DateTime, SHORT_DATE_TIME_FORMAT } from '../utils/time'
 
 const dashboardStore = useDashboardStore()
 const dataFilter = ref('all')
@@ -261,7 +261,7 @@ const getBatteryColor = (percentage) => {
 }
 
 const formatTime = (time) => {
-  return dayjs(time).format('MM-DD HH:mm:ss')
+  return formatUtc8DateTime(time, SHORT_DATE_TIME_FORMAT)
 }
 
 const refreshStatus = async () => {

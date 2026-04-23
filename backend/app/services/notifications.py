@@ -50,6 +50,7 @@ def build_webhook_payload(
             "warning_level": _normalize_value(sensor.warning_level),
             "danger_level": _normalize_value(sensor.danger_level),
             "threshold_condition": getattr(sensor, "threshold_condition", None) or "greater_or_equal",
+            "measurement_unit": getattr(sensor, "measurement_unit", None) or "cm",
             "is_active": sensor.is_active,
             "report_method": sensor.report_method,
             "device_imei": sensor.device_imei,

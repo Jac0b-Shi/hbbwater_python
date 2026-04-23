@@ -326,9 +326,9 @@
 
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
-import dayjs from 'dayjs'
 import { ElMessage } from 'element-plus'
 import axios from 'axios'
+import { formatUtc8DateTime } from '../utils/time'
 
 const systemConfig = ref({
   data_retention_days: 14,
@@ -470,7 +470,7 @@ const resetBusinessPasswordDraft = () => {
   businessPasswordFieldKey.value += 1
 }
 
-const formatDateTime = (value) => value ? dayjs(value).format('YYYY-MM-DD HH:mm:ss') : '-'
+const formatDateTime = (value) => formatUtc8DateTime(value)
 
 const buildNotifyConfigPayload = () => {
   const payload = {

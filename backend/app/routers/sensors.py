@@ -1,5 +1,6 @@
 """Sensor data API routes."""
 from datetime import datetime, timedelta
+from decimal import Decimal
 from typing import Optional, List
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -35,6 +36,9 @@ WEBHOOK_REPORT_METHODS = {
     ReportMethod.COAP.value,
 }
 
+MEASUREMENT_UNIT_CM = "cm"
+MEASUREMENT_UNIT_MM = "mm"
+
 
 def generate_webhook_token() -> str:
     """Generate a short webhook token for externally pushed sensors."""
@@ -46,6 +50,20 @@ def get_sensor_type_value(sensor_type: SensorType | str) -> str:
     return sensor_type.value if isinstance(sensor_type, SensorType) else str(sensor_type)
 
 
+def get_measurement_unit(sensor: Sensor) -> str:
+    """Return the configured raw ultrasonic measurement unit."""
+    unit = getattr(sensor, "measurement_unit", None)
+    return unit if unit in {MEASUREMENT_UNIT_CM, MEASUREMENT_UNIT_MM} else MEASUREMENT_UNIT_CM
+
+
+def normalize_water_level(sensor: Sensor, value: Decimal | float | int | str) -> Decimal:
+    """Convert the incoming ultrasonic reading into centimeters for storage."""
+    measurement = value if isinstance(value, Decimal) else Decimal(str(value))
+    if get_measurement_unit(sensor) == MEASUREMENT_UNIT_MM:
+        return measurement / Decimal("10")
+    return measurement
+
+
 def prepare_sensor_payload(sensor_data: dict, existing_sensor: Optional[Sensor] = None) -> dict:
     """Normalize sensor config before persisting it."""
     report_method = sensor_data.get("report_method")
@@ -53,6 +71,7 @@ def prepare_sensor_payload(sensor_data: dict, existing_sensor: Optional[Sensor] 
     webhook_group_id = sensor_data.get("webhook_group_id")
     webhook_group_token = sensor_data.get("webhook_group_token")
     device_imei = sensor_data.get("device_imei")
+    measurement_unit = sensor_data.get("measurement_unit")
 
     if isinstance(webhook_token, str):
         webhook_token = webhook_token.strip() or None
@@ -67,6 +86,8 @@ def prepare_sensor_payload(sensor_data: dict, existing_sensor: Optional[Sensor] 
     if isinstance(device_imei, str):
         device_imei = device_imei.strip() or None
         sensor_data["device_imei"] = device_imei
+    if isinstance(measurement_unit, str):
+        sensor_data["measurement_unit"] = measurement_unit.strip() or MEASUREMENT_UNIT_CM
 
     current_token = existing_sensor.webhook_token if existing_sensor else None
     current_group_id = existing_sensor.webhook_group_id if existing_sensor else None
@@ -155,10 +176,13 @@ def build_group_sensor_reading(sensor: Sensor, payload: GroupWebhookDataInput, d
     raw_data["device_imei"] = device_imei
 
     if sensor_type == SensorType.ULTRASONIC.value:
-        water_level = extract_group_water_level(payload)
-        if water_level is None:
+        raw_water_level = extract_group_water_level(payload)
+        if raw_water_level is None:
             raise HTTPException(status_code=422, detail="Ultrasonic group webhook data requires water_level or another measurement field")
-        status = infer_ultrasonic_status(sensor, water_level, fallback_status=payload.status)
+        water_level = normalize_water_level(sensor, raw_water_level)
+        raw_data["measurement_unit"] = get_measurement_unit(sensor)
+        raw_data["normalized_water_level_cm"] = float(water_level)
+        status = infer_ultrasonic_status(sensor, float(water_level), fallback_status=payload.status)
         return SensorReading(
             sensor_id=sensor.sensor_id,
             sensor_type=sensor_type,
@@ -306,13 +330,16 @@ def build_sensor_reading(sensor: Sensor, payload: SensorDataInput | WebhookDataI
     if sensor_type == SensorType.ULTRASONIC.value:
         if payload.water_level is None:
             raise HTTPException(status_code=422, detail="Ultrasonic sensor data requires water_level")
+        water_level = normalize_water_level(sensor, payload.water_level)
+        reading_data["raw_data"]["measurement_unit"] = get_measurement_unit(sensor)
+        reading_data["raw_data"]["normalized_water_level_cm"] = float(water_level)
         reading_data["status"] = infer_ultrasonic_status(
             sensor,
-            float(payload.water_level),
+            float(water_level),
             fallback_status=payload.status,
         )
         reading_data.update({
-            "water_level": payload.water_level,
+            "water_level": water_level,
             "battery_level": payload.battery_level,
             "signal_strength": payload.signal_strength,
         })

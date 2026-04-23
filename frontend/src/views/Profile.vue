@@ -123,11 +123,11 @@
 
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
-import dayjs from 'dayjs'
 import { ElMessage } from 'element-plus'
 import { UserFilled, Message, Phone, Timer, Connection, Key } from '@element-plus/icons-vue'
 import { useAccountStore } from '../stores/account'
 import { validatePassword } from '../utils/password'
+import { formatUtc8DateTime } from '../utils/time'
 
 const accountStore = useAccountStore()
 const profileForm = ref({
@@ -145,7 +145,7 @@ const passwordForm = ref({
 
 const createdAtText = computed(() => {
   const value = accountStore.profile?.created_at
-  return value ? dayjs(value).format('YYYY-MM-DD HH:mm') : '-'
+  return formatUtc8DateTime(value, 'YYYY-MM-DD HH:mm')
 })
 
 const permissionSummary = computed(() => {

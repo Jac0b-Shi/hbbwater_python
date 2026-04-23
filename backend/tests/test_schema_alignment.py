@@ -56,6 +56,7 @@ class SchemaAlignmentTests(unittest.IsolatedAsyncioTestCase):
                         webhook_group_id=999,
                         webhook_group_token="legacy-group-token",
                         threshold_condition=None,
+                        measurement_unit=None,
                     ),
                     Sensor(
                         sensor_id="broken_sensor",
@@ -84,6 +85,7 @@ class SchemaAlignmentTests(unittest.IsolatedAsyncioTestCase):
             grouped_sensor = grouped_sensor_result.scalar_one()
             self.assertEqual(grouped_sensor.webhook_group_id, group.id)
             self.assertEqual(grouped_sensor.threshold_condition, "greater_or_equal")
+            self.assertEqual(grouped_sensor.measurement_unit, "cm")
 
             broken_sensor_result = await session.execute(
                 select(Sensor).where(Sensor.sensor_id == "broken_sensor")

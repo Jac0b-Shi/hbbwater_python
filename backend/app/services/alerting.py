@@ -100,7 +100,7 @@ async def _resolve_active_alerts(
         select(Alert).where(
             Alert.sensor_id == sensor_id,
             Alert.alert_type == alert_type,
-            Alert.is_resolved.is_(False),
+            Alert.is_resolved == False,
         )
     )
     for alert in result.scalars().all():
@@ -122,7 +122,7 @@ async def _get_latest_active_alert(
             Alert.sensor_id == sensor_id,
             Alert.alert_type == alert_type,
             Alert.severity == severity,
-            Alert.is_resolved.is_(False),
+            Alert.is_resolved == False,
         )
         .order_by(desc(Alert.created_at))
         .limit(1)

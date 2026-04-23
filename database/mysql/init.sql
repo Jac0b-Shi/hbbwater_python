@@ -39,6 +39,8 @@ CREATE TABLE IF NOT EXISTS sensors (
     description TEXT COMMENT '描述信息',
     warning_level DECIMAL(10,2) DEFAULT NULL COMMENT '预警水位值(cm)',
     danger_level DECIMAL(10,2) DEFAULT NULL COMMENT '危险水位值(cm)',
+    threshold_condition VARCHAR(32) DEFAULT 'greater_or_equal' COMMENT '阈值比较方向',
+    measurement_unit VARCHAR(8) DEFAULT 'cm' COMMENT '传感器返回值单位(cm/mm)',
     normal_interval INT DEFAULT 1800 COMMENT '正常模式上报间隔(秒),默认30分钟',
     alert_interval INT DEFAULT 300 COMMENT '预警模式上报间隔(秒),默认5分钟',
     is_active BOOLEAN DEFAULT TRUE COMMENT '是否启用',

@@ -36,6 +36,8 @@ CREATE TABLE sensors (
     description CLOB,
     warning_level DECIMAL(10,2),
     danger_level DECIMAL(10,2),
+    threshold_condition VARCHAR(32) DEFAULT 'greater_or_equal',
+    measurement_unit VARCHAR(8) DEFAULT 'cm',
     normal_interval INT DEFAULT 1800,
     alert_interval INT DEFAULT 300,
     is_active SMALLINT DEFAULT 1,

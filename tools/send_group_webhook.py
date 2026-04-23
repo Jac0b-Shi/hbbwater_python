@@ -231,8 +231,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--status", choices=["normal", "warning", "danger", "alarm", "offline"], help="显式覆盖状态")
     parser.add_argument("--detected", action="store_true", help="浸水组单发时标记为有水")
     parser.add_argument("--water-status", type=int, choices=[0, 1], help="浸水组显式指定 water_status")
-    parser.add_argument("--measurement-value", type=float, help="超声波组测量值")
-    parser.add_argument("--adc-raw", type=int, help="作为兜底测量值发送")
+    parser.add_argument("--measurement-value", type=float, help="超声波组测量值，单位按后台传感器返回单位配置解释")
+    parser.add_argument("--adc-raw", type=int, help="作为兜底测量值发送，单位按后台传感器返回单位配置解释")
     return parser
 
 

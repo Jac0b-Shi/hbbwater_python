@@ -125,7 +125,7 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useAccountStore } from '../stores/account'
 import { useAlertStore } from '../stores/alerts'
-import dayjs from 'dayjs'
+import { formatUtc8DateTime } from '../utils/time'
 
 const accountStore = useAccountStore()
 const alertStore = useAlertStore()
@@ -165,7 +165,7 @@ const getAlertTypeText = (type) => {
   return map[type] || type
 }
 
-const formatTime = (time) => dayjs(time).format('YYYY-MM-DD HH:mm:ss')
+const formatTime = (time) => formatUtc8DateTime(time)
 
 const refreshAlerts = () => {
   alertStore.fetchAlerts()

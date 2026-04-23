@@ -2,6 +2,24 @@ import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
 import axios from 'axios'
 
+const numericFields = ['water_level', 'battery_level']
+
+function toNumber(value) {
+  if (value === null || value === undefined || value === '') return null
+  const number = Number(value)
+  return Number.isFinite(number) ? number : value
+}
+
+function normalizeNumericFields(item) {
+  if (!item) return item
+  return numericFields.reduce((normalized, field) => {
+    if (field in normalized) {
+      normalized[field] = toNumber(normalized[field])
+    }
+    return normalized
+  }, { ...item })
+}
+
 export const useDashboardStore = defineStore('dashboard', () => {
   // State
   const stats = ref({
@@ -58,8 +76,8 @@ export const useDashboardStore = defineStore('dashboard', () => {
       const response = await axios.get('/api/dashboard/recent-readings', {
         params: { limit }
       })
-      recentReadings.value = response.data
-      return response.data
+      recentReadings.value = response.data.map(normalizeNumericFields)
+      return recentReadings.value
     } catch (err) {
       console.error('Failed to fetch recent readings:', err)
       throw err
@@ -82,8 +100,8 @@ export const useDashboardStore = defineStore('dashboard', () => {
   async function fetchSensorStatus() {
     try {
       const response = await axios.get('/api/dashboard/sensor-status')
-      sensorStatus.value = response.data
-      return response.data
+      sensorStatus.value = response.data.map(normalizeNumericFields)
+      return sensorStatus.value
     } catch (err) {
       console.error('Failed to fetch sensor status:', err)
       throw err

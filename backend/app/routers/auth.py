@@ -64,11 +64,26 @@ async def register(
     payload: RegisterRequest,
     db: AsyncSession = Depends(get_control_db),
 ):
-    """Register a new local user and automatically sign them in."""
+    """Register a new local user.
+
+    The first local account bootstraps the system and is signed in immediately.
+    Later self-registered accounts remain inactive until a super admin enables them.
+    """
     user = await account_service.register_user(db, payload.model_dump())
+    if not user.get("is_active"):
+        return {
+            "message": "注册成功，账号默认停用，请联系超级管理员开通账号权限后再登录",
+            "requires_activation": True,
+            "access_token": None,
+            "token_type": "bearer",
+            "expires_in": 0,
+            "user": user,
+        }
+
     token, expires_in = create_access_token(user)
     return {
         "message": "注册成功",
+        "requires_activation": False,
         "access_token": token,
         "token_type": "bearer",
         "expires_in": expires_in,

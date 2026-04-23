@@ -6,8 +6,9 @@
 
 1. 在后台创建 Webhook 组，并把组内传感器绑定到该组。
 2. 每个组内传感器必须配置唯一 `device_imei`，用于转发服务上报时路由到具体传感器。
-3. 转发服务保存该组的 Webhook URL，收到设备数据后向该 URL 发送 JSON。
-4. 后端按 URL token 找到组，再按 payload 内的 IMEI 找到组内传感器，写入读数并触发告警/通知。
+3. 超声波传感器需要确认“传感器返回单位”为 `cm` 或 `mm`；后端会按该配置换算成厘米后入库、展示和告警。
+4. 转发服务保存该组的 Webhook URL，收到设备数据后向该 URL 发送 JSON。
+5. 后端按 URL token 找到组，再按 payload 内的 IMEI 找到组内传感器，写入读数并触发告警/通知。
 
 ## Endpoint
 
@@ -90,10 +91,10 @@ https://<your-domain>/api/sensors/group-webhook/<group_webhook_token>
 
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
-| `water_level` | number | 推荐字段，水位或测距值，单位按传感器配置约定为 cm |
+| `water_level` | number | 推荐字段，水位或测距值，单位按后台传感器“返回单位”配置解释 |
 | `measurement_value` | number | 测量值兼容字段，单位同 `water_level` |
 | `sensor_value` | number | 测量值兼容字段，单位同 `water_level` |
-| `adc_raw` | integer | 原始 ADC 值，仅建议在没有换算值时作为兜底 |
+| `adc_raw` | integer | 原始 ADC 值，仅建议在没有换算值时作为兜底；一旦作为测量值使用，也会按传感器返回单位换算 |
 
 示例：
 
@@ -114,6 +115,7 @@ https://<your-domain>/api/sensors/group-webhook/<group_webhook_token>
 超声波状态规则：
 
 - 后端优先按传感器自身的 `warning_level`、`danger_level` 和 `threshold_condition` 计算状态。
+- 如果传感器返回单位配置为 `mm`，后端会先将上报值除以 10，统一按 `cm` 存储和展示。
 - 当前设备如果上报的是“传感器到水面的测距值”，通常应把传感器配置为 `threshold_condition = less_or_equal`，即数值越小越危险。
 - `status` 只作为缺少有效阈值配置时的兜底状态，不建议转发服务自行判定超声波告警等级。
 

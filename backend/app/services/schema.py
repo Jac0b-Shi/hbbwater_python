@@ -219,11 +219,20 @@ async def ensure_runtime_schema(conn: AsyncConnection, dialect_name: str) -> Non
         await conn.execute(text(_build_add_column_sql(conn, "sensors", "device_imei", String(32))))
     if not await _column_exists(conn, "sensors", "threshold_condition"):
         await conn.execute(text(_build_add_column_sql(conn, "sensors", "threshold_condition", String(32))))
+    if not await _column_exists(conn, "sensors", "measurement_unit"):
+        await conn.execute(text(_build_add_column_sql(conn, "sensors", "measurement_unit", String(8))))
     await conn.execute(
         text(
             "UPDATE sensors "
             "SET threshold_condition = 'greater_or_equal' "
             "WHERE threshold_condition IS NULL OR threshold_condition = ''"
+        )
+    )
+    await conn.execute(
+        text(
+            "UPDATE sensors "
+            "SET measurement_unit = 'cm' "
+            "WHERE measurement_unit IS NULL OR measurement_unit = ''"
         )
     )
     if not await _index_exists(conn, "sensors", "idx_webhook_group_token"):

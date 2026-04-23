@@ -1,6 +1,48 @@
 import { ref, computed } from 'vue'
 import { defineStore } from 'pinia'
 import axios from 'axios'
+import { parseUtcDate } from '../utils/time'
+
+const numericFields = ['water_level', 'battery_level', 'warning_level', 'danger_level']
+
+function toNumber(value) {
+  if (value === null || value === undefined || value === '') return null
+  const number = Number(value)
+  return Number.isFinite(number) ? number : value
+}
+
+function normalizeNumericFields(item) {
+  if (!item) return item
+  return numericFields.reduce((normalized, field) => {
+    if (field in normalized) {
+      normalized[field] = toNumber(normalized[field])
+    }
+    return normalized
+  }, { ...item })
+}
+
+function normalizeReading(reading) {
+  return normalizeNumericFields(reading)
+}
+
+function normalizeGroup(group) {
+  if (!group) return group
+  return {
+    ...group,
+    sensors: (group.sensors || []).map(normalizeNumericFields)
+  }
+}
+
+function normalizeTimeSeries(series) {
+  if (!series?.data) return series
+  return {
+    ...series,
+    data: series.data.map(point => ({
+      ...point,
+      value: toNumber(point.value)
+    }))
+  }
+}
 
 export const useSensorStore = defineStore('sensors', () => {
   // State
@@ -32,7 +74,8 @@ export const useSensorStore = defineStore('sensors', () => {
     const threshold = new Date(Date.now() - 60 * 60 * 1000) // 60 minutes
     return sensors.value.filter(s => {
       const lastReading = readings.value[s.sensor_id]?.[0]
-      return lastReading && new Date(lastReading.recorded_at) > threshold
+      const recordedAt = parseUtcDate(lastReading?.recorded_at)
+      return recordedAt && recordedAt > threshold
     })
   })
   
@@ -47,9 +90,9 @@ export const useSensorStore = defineStore('sensors', () => {
     
     try {
       const response = await axios.get('/api/sensors/', { params })
-      sensors.value = response.data
+      sensors.value = response.data.map(normalizeNumericFields)
       lastFetch.value = new Date()
-      return response.data
+      return sensors.value
     } catch (err) {
       error.value = err.message
       console.error('Failed to fetch sensors:', err)
@@ -62,8 +105,8 @@ export const useSensorStore = defineStore('sensors', () => {
   async function fetchGroups() {
     try {
       const response = await axios.get('/api/sensors/groups')
-      groups.value = response.data
-      return response.data
+      groups.value = response.data.map(normalizeGroup)
+      return groups.value
     } catch (err) {
       console.error('Failed to fetch webhook groups:', err)
       throw err
@@ -73,7 +116,7 @@ export const useSensorStore = defineStore('sensors', () => {
   async function fetchSensor(sensorId) {
     try {
       const response = await axios.get(`/api/sensors/${sensorId}`)
-      return response.data
+      return normalizeNumericFields(response.data)
     } catch (err) {
       console.error('Failed to fetch sensor:', err)
       throw err
@@ -83,8 +126,9 @@ export const useSensorStore = defineStore('sensors', () => {
   async function createSensor(sensorData) {
     try {
       const response = await axios.post('/api/sensors/', sensorData)
-      sensors.value.push(response.data)
-      return response.data
+      const sensor = normalizeNumericFields(response.data)
+      sensors.value.push(sensor)
+      return sensor
     } catch (err) {
       console.error('Failed to create sensor:', err)
       throw err
@@ -134,11 +178,12 @@ export const useSensorStore = defineStore('sensors', () => {
   async function updateSensor(sensorId, sensorData) {
     try {
       const response = await axios.patch(`/api/sensors/${sensorId}`, sensorData)
+      const sensor = normalizeNumericFields(response.data)
       const index = sensors.value.findIndex(s => s.sensor_id === sensorId)
       if (index !== -1) {
-        sensors.value[index] = response.data
+        sensors.value[index] = sensor
       }
-      return response.data
+      return sensor
     } catch (err) {
       console.error('Failed to update sensor:', err)
       throw err
@@ -158,8 +203,12 @@ export const useSensorStore = defineStore('sensors', () => {
   async function fetchReadings(sensorId, params = {}) {
     try {
       const response = await axios.get(`/api/sensors/${sensorId}/readings`, { params })
-      readings.value[sensorId] = response.data.items
-      return response.data
+      const data = {
+        ...response.data,
+        items: response.data.items.map(normalizeReading)
+      }
+      readings.value[sensorId] = data.items
+      return data
     } catch (err) {
       console.error('Failed to fetch readings:', err)
       throw err
@@ -171,8 +220,9 @@ export const useSensorStore = defineStore('sensors', () => {
       const response = await axios.get(`/api/sensors/${sensorId}/timeseries`, {
         params: { field, hours }
       })
-      timeSeries.value[`${sensorId}_${field}`] = response.data
-      return response.data
+      const data = normalizeTimeSeries(response.data)
+      timeSeries.value[`${sensorId}_${field}`] = data
+      return data
     } catch (err) {
       console.error('Failed to fetch time series:', err)
       throw err
@@ -200,7 +250,7 @@ export const useSensorStore = defineStore('sensors', () => {
     if (!readings.value[sensorId]) {
       readings.value[sensorId] = []
     }
-    readings.value[sensorId].unshift(reading)
+    readings.value[sensorId].unshift(normalizeReading(reading))
     // Keep only last 100 readings
     if (readings.value[sensorId].length > 100) {
       readings.value[sensorId] = readings.value[sensorId].slice(0, 100)

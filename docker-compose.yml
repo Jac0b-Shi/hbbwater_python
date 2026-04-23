@@ -2,7 +2,7 @@
 # 一键部署所有服务
 
 services:
-  # MySQL 数据库
+  # MySQL 数据库（仅 Docker 内网访问，不向宿主机发布 3306）
   mysql:
     image: mysql:8.0
     container_name: flood-monitoring-mysql
@@ -17,8 +17,8 @@ services:
       - mysql_data:/var/lib/mysql
       - ./database/mysql/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
       - ./database/mysql/procedures.sql:/docker-entrypoint-initdb.d/02-procedures.sql:ro
-    ports:
-      - "3306:3306"
+    expose:
+      - "3306"
     networks:
       - flood-network
     healthcheck:

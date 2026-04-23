@@ -6,14 +6,14 @@
         <p>
           {{
             requiresEmailVerification
-              ? '验证码会发送到系统设置里配置的发信渠道，请先确保通知设置中的邮箱配置可用。'
+              ? '新账号通过邮箱验证码完成注册，注册后默认停用，需要联系超级管理员开通账号权限。'
               : '系统当前还没有可用的超级管理员。首个用户可直接注册，无需邮箱验证码，注册完成后会自动成为超级管理员。'
           }}
         </p>
       </div>
 
       <el-alert
-        :title="requiresEmailVerification ? '首个完成注册并成功设置密码的账号会自动成为超级管理员。' : '当前处于初始化模式，本次注册将直接创建超级管理员账号。'"
+        :title="requiresEmailVerification ? '注册完成后暂时不能登录，请等待超级管理员启用账号。' : '当前处于初始化模式，本次注册将直接创建超级管理员账号。'"
         :type="requiresEmailVerification ? 'info' : 'warning'"
         :closable="false"
         class="register-alert"
@@ -66,23 +66,23 @@
 
     <div class="auth-panel brand-panel">
       <div class="brand-badge">REGISTER</div>
-      <h1>按角色接入系统</h1>
+      <h1>申请接入监测系统</h1>
       <p>
-        注册后系统会按用户角色自动限制功能范围。
-        超级管理员可管理用户与系统设置，管理员可管理传感器，普通用户保留只读访问。
+        用于校园重点区域水位与浸水状态监测。
+        提交账号申请后，由超级管理员确认并开通访问权限。
       </p>
       <div class="brand-points">
         <div class="point-card">
-          <strong>超级管理员</strong>
-          <span>用户管理、权限分配、系统设置、全部业务管理</span>
+          <strong>实时监测</strong>
+          <span>统一查看超声波与浸水传感器状态</span>
         </div>
         <div class="point-card">
-          <strong>管理员</strong>
-          <span>传感器管理、状态切换、告警处理</span>
+          <strong>邮箱验证</strong>
+          <span>确认邮箱后提交账号申请</span>
         </div>
         <div class="point-card">
-          <strong>用户</strong>
-          <span>查看仪表盘、历史数据、告警和个人资料</span>
+          <strong>权限开通</strong>
+          <span>超级管理员启用账号后即可登录</span>
         </div>
       </div>
     </div>
@@ -194,14 +194,19 @@ const submitRegister = async () => {
   }
 
   try {
-    await accountStore.register({
+    const result = await accountStore.register({
       username: form.value.username.trim(),
       display_name: form.value.display_name.trim(),
       email: form.value.email.trim(),
       verification_code: requiresEmailVerification.value ? form.value.verification_code.trim() : null,
       password: form.value.password
     })
-    ElMessage.success(requiresEmailVerification.value ? '注册成功' : '超级管理员创建成功')
+    if (result.requires_activation) {
+      ElMessage.success(result.message || '注册成功，请联系超级管理员开通账号权限')
+      router.push('/login')
+      return
+    }
+    ElMessage.success('超级管理员创建成功')
     router.push(route.query.redirect || '/')
   } catch (error) {
     ElMessage.error(error.response?.data?.detail || accountStore.error || '注册失败')

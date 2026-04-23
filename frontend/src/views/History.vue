@@ -115,6 +115,7 @@ import { GridComponent, TooltipComponent, LegendComponent, DataZoomComponent } f
 import VChart from 'vue-echarts'
 import { useSensorStore } from '../stores/sensors'
 import dayjs from 'dayjs'
+import { formatUtc8AsBackendUtc, formatUtc8DateTime } from '../utils/time'
 
 use([CanvasRenderer, LineChart, ScatterChart, GridComponent, TooltipComponent, LegendComponent, DataZoomComponent])
 
@@ -147,7 +148,7 @@ const chartOption = computed(() => {
   
   const data = historyData.value
     .filter(d => isUltrasonic ? d.water_level !== null : d.water_detected !== null)
-    .map(d => [d.recorded_at, isUltrasonic ? d.water_level : (d.water_detected ? 1 : 0)])
+    .map(d => [formatUtc8DateTime(d.recorded_at), isUltrasonic ? d.water_level : (d.water_detected ? 1 : 0)])
     .reverse()
 
   return {
@@ -173,7 +174,7 @@ const chartOption = computed(() => {
   }
 })
 
-const formatTime = (time) => dayjs(time).format('YYYY-MM-DD HH:mm:ss')
+const formatTime = (time) => formatUtc8DateTime(time)
 
 const getStatusType = (status) => {
   const map = { normal: 'success', warning: 'warning', danger: 'danger', alarm: 'danger', offline: 'info' }
@@ -195,8 +196,8 @@ const queryHistory = async () => {
   try {
     const params = { limit: 10000 }
     if (filterForm.value.timeRange?.length === 2) {
-      params.start_time = filterForm.value.timeRange[0]
-      params.end_time = filterForm.value.timeRange[1]
+      params.start_time = formatUtc8AsBackendUtc(filterForm.value.timeRange[0])
+      params.end_time = formatUtc8AsBackendUtc(filterForm.value.timeRange[1])
     }
     
     const response = await sensorStore.fetchReadings(filterForm.value.sensor_id, params)

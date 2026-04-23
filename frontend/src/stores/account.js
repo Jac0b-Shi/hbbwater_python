@@ -166,10 +166,15 @@ export const useAccountStore = defineStore('account', () => {
 
     try {
       const { data } = await axios.post('/api/auth/register', payload)
-      setToken(data.access_token)
-      profile.value = data.user
-      authReady.value = true
-      await fetchProfile(true)
+      if (data.access_token) {
+        setToken(data.access_token)
+        profile.value = data.user
+        authReady.value = true
+        await fetchProfile(true)
+      } else {
+        clearSession()
+        authReady.value = true
+      }
       return data
     } catch (err) {
       error.value = err.response?.data?.detail || err.message

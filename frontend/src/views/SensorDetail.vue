@@ -28,6 +28,7 @@
               <el-switch v-model="sensor.is_active" :disabled="!accountStore.canManageSensors" @change="updateActive" />
             </el-descriptions-item>
             <template v-if="sensor.sensor_type === 'ultrasonic'">
+              <el-descriptions-item label="返回单位">{{ formatMeasurementUnit(sensor.measurement_unit) }}</el-descriptions-item>
               <el-descriptions-item label="阈值判定">{{ formatThresholdCondition(sensor.threshold_condition) }}</el-descriptions-item>
               <el-descriptions-item label="预警水位">{{ sensor.warning_level }} cm</el-descriptions-item>
               <el-descriptions-item label="危险水位">{{ sensor.danger_level }} cm</el-descriptions-item>
@@ -46,7 +47,7 @@
             <div class="reading-time">{{ formatTime(latestReading.recorded_at) }}</div>
             <div class="reading-main" v-if="sensor.sensor_type === 'ultrasonic'">
               <div class="reading-value">{{ latestReading.water_level?.toFixed(1) }}<span class="unit">cm</span></div>
-              <div class="reading-label">当前水位</div>
+              <div class="reading-label">当前水位（已换算为 cm）</div>
             </div>
             <div class="reading-main" v-else>
               <div class="reading-value" :class="latestReading.water_detected ? 'danger' : 'success'">
@@ -133,7 +134,7 @@ import { GridComponent, TooltipComponent, LegendComponent, DataZoomComponent } f
 import VChart from 'vue-echarts'
 import { useAccountStore } from '../stores/account'
 import { useSensorStore } from '../stores/sensors'
-import dayjs from 'dayjs'
+import { formatUtc8DateTime } from '../utils/time'
 
 use([CanvasRenderer, LineChart, GridComponent, TooltipComponent, LegendComponent, DataZoomComponent])
 
@@ -184,7 +185,7 @@ const chartOption = computed(() => {
         }
       },
       lineStyle: { color: '#409eff', width: 2 },
-      data: data.map(d => [d.timestamp, d.value])
+      data: data.map(d => [formatUtc8DateTime(d.timestamp), d.value])
     }]
   }
 })
@@ -195,7 +196,7 @@ const formatInterval = (seconds) => {
   return `${seconds}秒`
 }
 
-const formatTime = (time) => dayjs(time).format('YYYY-MM-DD HH:mm:ss')
+const formatTime = (time) => formatUtc8DateTime(time)
 
 const getStatusType = (status) => {
   const map = { normal: 'success', warning: 'warning', danger: 'danger', alarm: 'danger', offline: 'info' }
@@ -225,6 +226,10 @@ const formatReportMethod = (sensorData) => {
 
 const formatThresholdCondition = (value) => (
   value === 'less_or_equal' ? '小于等于阈值触发' : '大于等于阈值触发'
+)
+
+const formatMeasurementUnit = (value) => (
+  value === 'mm' ? '毫米 (mm)，页面自动换算为 cm' : '厘米 (cm)'
 )
 
 const updateActive = async (val) => {

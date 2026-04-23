@@ -504,7 +504,9 @@ class AccountService:
     async def authenticate(self, db: AsyncSession, login: str, password: str) -> dict[str, Any]:
         await self.ensure_bootstrap(db)
         user = await self._get_user_by_login(db, login)
-        if not user or not user.is_active:
+        if user and not user.is_active:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="账号已停用，请联系超级管理员开通账号权限")
+        if not user:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="账号或密码错误")
 
         if not user.password_hash:
@@ -606,6 +608,7 @@ class AccountService:
                 raise HTTPException(status_code=400, detail="验证码错误")
 
         role = ROLE_SUPER_ADMIN if not has_usable_super_admin else ROLE_USER
+        is_active = role == ROLE_SUPER_ADMIN
         user = AdminUser(
             username=username,
             display_name=display_name,
@@ -614,7 +617,7 @@ class AccountService:
             role=role,
             password_hash=_hash_password(password),
             auth_provider="local",
-            is_active=True,
+            is_active=is_active,
         )
         db.add(user)
         await db.flush()

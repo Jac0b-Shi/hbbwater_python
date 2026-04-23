@@ -15,6 +15,7 @@ class SensorBase(BaseModel):
     warning_level: Optional[Decimal] = None
     danger_level: Optional[Decimal] = None
     threshold_condition: str = Field(default="greater_or_equal", pattern="^(greater_or_equal|less_or_equal)$")
+    measurement_unit: str = Field(default="cm", pattern="^(cm|mm)$")
     normal_interval: int = Field(default=1800, ge=60)
     alert_interval: int = Field(default=300, ge=60)
     is_active: bool = True
@@ -29,6 +30,11 @@ class SensorBase(BaseModel):
     def default_threshold_condition(cls, value):
         return value or "greater_or_equal"
 
+    @field_validator("measurement_unit", mode="before")
+    @classmethod
+    def default_measurement_unit(cls, value):
+        return value or "cm"
+
 
 class SensorCreate(SensorBase):
     pass
@@ -41,6 +47,7 @@ class SensorUpdate(BaseModel):
     warning_level: Optional[Decimal] = None
     danger_level: Optional[Decimal] = None
     threshold_condition: Optional[str] = Field(None, pattern="^(greater_or_equal|less_or_equal)$")
+    measurement_unit: Optional[str] = Field(None, pattern="^(cm|mm)$")
     normal_interval: Optional[int] = Field(None, ge=60)
     alert_interval: Optional[int] = Field(None, ge=60)
     is_active: Optional[bool] = None
@@ -64,7 +71,7 @@ class SensorResponse(SensorBase):
 # ==================== Sensor Reading Schemas ====================
 
 class UltrasonicReading(BaseModel):
-    water_level: Decimal = Field(..., description="水位(cm)")
+    water_level: Decimal = Field(..., description="超声波读数，单位按传感器配置换算后以厘米存储")
     battery_level: Optional[Decimal] = Field(None, ge=0, le=100)
     external_powered: Optional[bool] = False
     signal_strength: Optional[int] = None

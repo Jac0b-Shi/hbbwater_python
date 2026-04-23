@@ -1,9 +1,11 @@
 """Concurrency-focused tests for control-plane account bootstrap."""
 import asyncio
+import json
 import os
 import sys
 import tempfile
 import unittest
+from datetime import datetime, timedelta
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -16,9 +18,11 @@ if BACKEND_ROOT not in sys.path:
 IMPORT_ERROR = None
 
 try:
+    from fastapi import HTTPException
+
     from app.database import ControlBase
     from app.models import AdminUser, SystemConfig
-    from app.services.account import account_service
+    from app.services.account import _hash_registration_code, _registration_key, account_service
 except ModuleNotFoundError as exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = exc
 
@@ -66,3 +70,57 @@ class AccountBootstrapTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(user_count, 1)
         self.assertEqual(provider_count, 1)
+
+    async def test_self_registered_users_after_bootstrap_are_inactive(self):
+        async with self.session_factory() as session:
+            bootstrap_user = await account_service.register_user(
+                session,
+                {
+                    "username": "root",
+                    "display_name": "Root Admin",
+                    "email": "root@example.com",
+                    "password": "Password123!",
+                },
+            )
+
+            self.assertEqual(bootstrap_user["role"], "super_admin")
+            self.assertTrue(bootstrap_user["is_active"])
+
+            pending_email = "pending@example.com"
+            verification_code = "123456"
+            now = datetime.utcnow()
+            session.add(
+                SystemConfig(
+                    config_key=_registration_key(pending_email),
+                    config_value=json.dumps(
+                        {
+                            "email": pending_email,
+                            "code_hash": _hash_registration_code(pending_email, verification_code),
+                            "sent_at": now.isoformat(),
+                            "expires_at": (now + timedelta(minutes=10)).isoformat(),
+                        }
+                    ),
+                    description="注册验证码",
+                )
+            )
+            await session.commit()
+
+            pending_user = await account_service.register_user(
+                session,
+                {
+                    "username": "pending",
+                    "display_name": "Pending User",
+                    "email": pending_email,
+                    "verification_code": verification_code,
+                    "password": "Password123!",
+                },
+            )
+
+            self.assertEqual(pending_user["role"], "user")
+            self.assertFalse(pending_user["is_active"])
+
+            with self.assertRaises(HTTPException) as exc:
+                await account_service.authenticate(session, "pending", "Password123!")
+
+            self.assertEqual(exc.exception.status_code, 401)
+            self.assertEqual(exc.exception.detail, "账号已停用，请联系超级管理员开通账号权限")
