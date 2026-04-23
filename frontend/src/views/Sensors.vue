@@ -12,10 +12,11 @@
               data-testid="sensor-search"
               style="width: 240px"
             />
-            <el-button type="primary" @click="openGroupDialog()">
+            <el-tag v-if="!accountStore.canManageSensors" effect="plain" type="info">当前账号仅可查看</el-tag>
+            <el-button v-if="accountStore.canManageSensors" type="primary" @click="openGroupDialog()">
               <el-icon><Plus /></el-icon>添加组
             </el-button>
-            <el-button type="primary" plain data-testid="add-sensor-button" @click="openSensorDialog()">
+            <el-button v-if="accountStore.canManageSensors" type="primary" plain data-testid="add-sensor-button" @click="openSensorDialog()">
               <el-icon><Plus /></el-icon>添加传感器
             </el-button>
           </div>
@@ -42,9 +43,9 @@
               </div>
               <div class="group-actions">
                 <el-button type="primary" link @click="copyGroupUrl(group)">复制组Webhook</el-button>
-                <el-button type="primary" link @click="openSensorDialog(group)">添加组内传感器</el-button>
-                <el-button type="primary" link @click="openGroupDialog(group)">编辑组</el-button>
-                <el-button type="danger" link @click="deleteGroup(group)">删除组</el-button>
+                <el-button v-if="accountStore.canManageSensors" type="primary" link @click="openSensorDialog(group)">添加组内传感器</el-button>
+                <el-button v-if="accountStore.canManageSensors" type="primary" link @click="openGroupDialog(group)">编辑组</el-button>
+                <el-button v-if="accountStore.canManageSensors" type="danger" link @click="deleteGroup(group)">删除组</el-button>
               </div>
             </div>
           </template>
@@ -69,14 +70,14 @@
               <el-table-column prop="device_imei" label="设备IMEI" width="160" />
               <el-table-column prop="is_active" label="状态" width="90">
                 <template #default="{ row }">
-                  <el-switch v-model="row.is_active" @change="(val) => toggleActive(row, val)" />
+                  <el-switch v-model="row.is_active" :disabled="!accountStore.canManageSensors" @change="(val) => toggleActive(row, val)" />
                 </template>
               </el-table-column>
               <el-table-column label="操作" width="180" fixed="right">
                 <template #default="{ row }">
                   <el-button type="primary" link @click="viewDetail(row)">详情</el-button>
-                  <el-button type="primary" link @click="openSensorDialog(group, row)">编辑</el-button>
-                  <el-button type="danger" link @click="deleteSensor(row)">删除</el-button>
+                  <el-button v-if="accountStore.canManageSensors" type="primary" link @click="openSensorDialog(group, row)">编辑</el-button>
+                  <el-button v-if="accountStore.canManageSensors" type="danger" link @click="deleteSensor(row)">删除</el-button>
                 </template>
               </el-table-column>
             </el-table>
@@ -102,14 +103,14 @@
         <el-table-column prop="description" label="描述" show-overflow-tooltip />
         <el-table-column prop="is_active" label="状态" width="90">
           <template #default="{ row }">
-            <el-switch v-model="row.is_active" @change="(val) => toggleActive(row, val)" />
+            <el-switch v-model="row.is_active" :disabled="!accountStore.canManageSensors" @change="(val) => toggleActive(row, val)" />
           </template>
         </el-table-column>
         <el-table-column label="操作" width="180" fixed="right">
           <template #default="{ row }">
             <el-button type="primary" link @click="viewDetail(row)">详情</el-button>
-            <el-button type="primary" link @click="openSensorDialog(null, row)">编辑</el-button>
-            <el-button type="danger" link @click="deleteSensor(row)">删除</el-button>
+            <el-button v-if="accountStore.canManageSensors" type="primary" link @click="openSensorDialog(null, row)">编辑</el-button>
+            <el-button v-if="accountStore.canManageSensors" type="danger" link @click="deleteSensor(row)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -182,6 +183,17 @@
           <el-input v-model="sensorForm.description" type="textarea" rows="3" />
         </el-form-item>
         <template v-if="sensorForm.sensor_type === 'ultrasonic'">
+          <el-form-item label="阈值判定">
+            <el-select v-model="sensorForm.threshold_condition">
+              <el-option
+                v-for="option in thresholdConditionOptions"
+                :key="option.value"
+                :label="option.label"
+                :value="option.value"
+              />
+            </el-select>
+            <span class="form-hint">{{ thresholdConditionHint }}</span>
+          </el-form-item>
           <el-form-item label="预警水位(cm)">
             <el-input-number v-model="sensorForm.warning_level" :min="0" :max="500" />
           </el-form-item>
@@ -212,10 +224,12 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowDown, ArrowRight, CopyDocument, Plus } from '@element-plus/icons-vue'
+import { useAccountStore } from '../stores/account'
 import { useSensorStore } from '../stores/sensors'
 
 const route = useRoute()
 const router = useRouter()
+const accountStore = useAccountStore()
 const sensorStore = useSensorStore()
 
 const searchQuery = ref('')
@@ -243,6 +257,7 @@ const sensorForm = ref({
   description: '',
   warning_level: 30,
   danger_level: 50,
+  threshold_condition: 'greater_or_equal',
   normal_interval: 1800,
   alert_interval: 300,
   is_active: true,
@@ -273,6 +288,15 @@ const sensorRules = {
 }
 
 const filter = computed(() => route.meta.filter)
+const thresholdConditionOptions = [
+  { value: 'greater_or_equal', label: '大于等于阈值触发' },
+  { value: 'less_or_equal', label: '小于等于阈值触发' },
+]
+const thresholdConditionHint = computed(() => (
+  sensorForm.value.threshold_condition === 'less_or_equal'
+    ? '适合“传感器到水面的测距值”，值越小越危险；此时危险阈值应小于等于预警阈值'
+    : '适合常规水位值，值越大越危险；此时危险阈值应大于等于预警阈值'
+))
 
 const filteredGroups = computed(() => {
   const query = searchQuery.value.trim().toLowerCase()
@@ -296,7 +320,8 @@ const filteredGroups = computed(() => {
 const filteredStandaloneSensors = computed(() => {
   const query = searchQuery.value.trim().toLowerCase()
   return sensorStore.sensors.filter((sensor) => {
-    if (sensor.webhook_group_id) {
+    const belongsToResolvedGroup = Boolean(sensor.webhook_group_id && sensor.webhook_group_name)
+    if (belongsToResolvedGroup) {
       return false
     }
     if (filter.value && sensor.sensor_type !== filter.value) {
@@ -367,6 +392,7 @@ const resetSensorForm = () => {
     description: '',
     warning_level: 30,
     danger_level: 50,
+    threshold_condition: 'greater_or_equal',
     normal_interval: 1800,
     alert_interval: 300,
     is_active: true,
@@ -432,6 +458,7 @@ const openSensorDialog = (group = null, sensor = null) => {
       description: sensor.description || '',
       warning_level: sensor.warning_level,
       danger_level: sensor.danger_level,
+      threshold_condition: sensor.threshold_condition || 'greater_or_equal',
       normal_interval: sensor.normal_interval,
       alert_interval: sensor.alert_interval,
       is_active: sensor.is_active,
@@ -474,6 +501,26 @@ const saveGroup = async () => {
 const saveSensor = async () => {
   await sensorFormRef.value.validate()
   const payload = { ...sensorForm.value }
+  if (
+    payload.sensor_type === 'ultrasonic' &&
+    payload.warning_level !== null &&
+    payload.warning_level !== undefined &&
+    payload.danger_level !== null &&
+    payload.danger_level !== undefined
+  ) {
+    const invalid =
+      payload.threshold_condition === 'less_or_equal'
+        ? Number(payload.danger_level) > Number(payload.warning_level)
+        : Number(payload.danger_level) < Number(payload.warning_level)
+    if (invalid) {
+      ElMessage.error(
+        payload.threshold_condition === 'less_or_equal'
+          ? '当前为“小于等于阈值触发”，危险阈值必须小于或等于预警阈值'
+          : '当前为“大于等于阈值触发”，危险阈值必须大于或等于预警阈值'
+      )
+      return
+    }
+  }
   if (selectedGroup.value) {
     payload.webhook_group_id = selectedGroup.value.id
     payload.webhook_token = null

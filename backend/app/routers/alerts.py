@@ -9,10 +9,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_control_db, get_db
 from app.models import Alert, Sensor
 from app.schemas import AlertCreate, AlertResponse, AlertResolveRequest
-from app.services.email import send_alert_email
+from app.services.auth import get_current_user, require_roles
+from app.services.notifications import dispatch_alert_notifications
 from app.services.text import repair_mojibake
 
 router = APIRouter(prefix="/alerts", tags=["alerts"])
+require_sensor_manager = require_roles("super_admin", "admin")
 
 
 def serialize_alert(alert: Alert) -> dict:
@@ -39,6 +41,7 @@ async def list_alerts(
     is_resolved: Optional[bool] = None,
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
+    _: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Get alerts with filtering options."""
@@ -61,6 +64,7 @@ async def list_alerts(
 @router.get("/active", response_model=List[AlertResponse])
 async def get_active_alerts(
     severity: Optional[str] = None,
+    _: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Get all active (unresolved) alerts."""
@@ -75,7 +79,11 @@ async def get_active_alerts(
 
 
 @router.get("/{alert_id}", response_model=AlertResponse)
-async def get_alert(alert_id: int, db: AsyncSession = Depends(get_db)):
+async def get_alert(
+    alert_id: int,
+    _: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """Get a specific alert by ID."""
     result = await db.execute(select(Alert).where(Alert.id == alert_id))
     alert = result.scalar_one_or_none()
@@ -88,6 +96,7 @@ async def get_alert(alert_id: int, db: AsyncSession = Depends(get_db)):
 @router.post("/", response_model=AlertResponse, status_code=201)
 async def create_alert(
     alert: AlertCreate,
+    _: dict = Depends(require_sensor_manager),
     db: AsyncSession = Depends(get_db),
     control_db: AsyncSession = Depends(get_control_db),
 ):
@@ -103,20 +112,14 @@ async def create_alert(
     await db.commit()
     await db.refresh(db_alert)
     
-    # Send email notification for critical alerts
-    if alert.severity in ["critical", "warning"]:
-        try:
-            await send_alert_email(
-                control_db=control_db,
-                alert_type=alert.alert_type,
-                severity=alert.severity,
-                sensor_name=sensor.sensor_id,
-                location=sensor.location or "未知位置",
-                message=alert.message or f"检测到 {alert.alert_type} 告警"
-            )
-        except Exception:
-            # Log error but don't fail the alert creation
-            pass
+    try:
+        await dispatch_alert_notifications(
+            control_db,
+            sensor=sensor,
+            alert=db_alert,
+        )
+    except Exception:
+        pass
     
     return serialize_alert(db_alert)
 
@@ -125,6 +128,7 @@ async def create_alert(
 async def resolve_alert(
     alert_id: int,
     resolve_data: AlertResolveRequest,
+    _: dict = Depends(require_sensor_manager),
     db: AsyncSession = Depends(get_db)
 ):
     """Resolve an alert."""
@@ -147,7 +151,10 @@ async def resolve_alert(
 
 
 @router.get("/stats/summary")
-async def get_alert_stats(db: AsyncSession = Depends(get_db)):
+async def get_alert_stats(
+    _: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """Get alert statistics."""
     # Total alerts
     total_result = await db.execute(select(func.count()).select_from(Alert))

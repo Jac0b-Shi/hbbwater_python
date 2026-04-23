@@ -1,7 +1,9 @@
-"""Email service using WordPress mail API."""
+"""Email service using shared notification SMTP settings and WordPress mail API."""
 import os
+import smtplib
 import warnings
 from datetime import datetime
+from email.mime.text import MIMEText
 from typing import Optional
 
 import httpx
@@ -102,6 +104,61 @@ async def send_test_email_via_wordpress(to: str) -> tuple[bool, str]:
         return False, f"邮件发送异常: {str(e)}"
 
 
+async def send_email_via_smtp(
+    control_db: AsyncSession,
+    to: str,
+    subject: str,
+    message: str,
+) -> tuple[bool, str]:
+    """Send email directly with SMTP settings stored in system config."""
+    notify_config = await get_notification_config_values(control_db)
+
+    if not notify_config["smtp_host"] or not notify_config["smtp_user"] or not notify_config["smtp_password"]:
+        return False, "系统设置中的 SMTP 发信邮箱尚未完整配置"
+
+    msg = MIMEText(message, "plain", "utf-8")
+    msg["Subject"] = subject
+    msg["From"] = notify_config["smtp_user"]
+    msg["To"] = to
+
+    try:
+        if notify_config["smtp_port"] == 465:
+            server = smtplib.SMTP_SSL(notify_config["smtp_host"], notify_config["smtp_port"], timeout=20)
+        else:
+            server = smtplib.SMTP(notify_config["smtp_host"], notify_config["smtp_port"], timeout=20)
+            if notify_config["smtp_ssl"]:
+                server.starttls()
+
+        server.login(notify_config["smtp_user"], notify_config["smtp_password"])
+        server.sendmail(notify_config["smtp_user"], [to], msg.as_string())
+        server.quit()
+        return True, "邮件已通过 SMTP 发送"
+    except Exception as exc:
+        return False, f"SMTP 发送失败: {exc}"
+
+
+async def send_platform_email(
+    control_db: AsyncSession,
+    to: str,
+    subject: str,
+    message: str,
+) -> tuple[bool, str]:
+    """Send platform email using notification settings configured in system settings."""
+    smtp_success, smtp_message = await send_email_via_smtp(control_db, to, subject, message)
+    if smtp_success:
+        return smtp_success, smtp_message
+
+    notify_config = await get_notification_config_values(control_db)
+    if not notify_config["email_enabled"]:
+        return False, smtp_message
+
+    wp_success, wp_message = await send_email_via_wordpress(to=to, subject=subject, message=message)
+    if wp_success:
+        return wp_success, wp_message
+
+    return False, f"{smtp_message}; WordPress 发送失败: {wp_message}"
+
+
 async def send_alert_email(
     control_db: AsyncSession,
     alert_type: str,
@@ -139,17 +196,18 @@ async def send_alert_email(
     
     # Build email subject
     severity_map = {
-        "critical": "🔴 紧急",
-        "warning": "🟡 警告", 
-        "info": "🔵 信息"
+        "critical": "紧急",
+        "high": "警告",
+        "medium": "提醒",
+        "low": "通知",
     }
     severity_label = severity_map.get(severity, severity)
     
     alert_type_map = {
-        "flood": "水浸告警",
-        "offline": "设备离线",
-        "battery": "电量告警",
-        "threshold": "阈值告警"
+        "high_water": "水位告警",
+        "water_detected": "浸水告警",
+        "sensor_offline": "设备离线",
+        "low_battery": "电量告警",
     }
     alert_label = alert_type_map.get(alert_type, alert_type)
     
@@ -182,9 +240,9 @@ async def send_alert_email(
 ═══════════════════════════════
 """
     
-    # Send email via WordPress
-    return await send_email_via_wordpress(
+    return await send_platform_email(
+        control_db=control_db,
         to=recipient,
         subject=subject,
-        message=email_body
+        message=email_body,
     )

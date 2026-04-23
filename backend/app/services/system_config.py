@@ -10,6 +10,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import SystemConfig
 
 
+def _normalized_config_text(value: str) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
 async def get_config_value(db: AsyncSession, key: str, default: str = "") -> str:
     """Get config value by key."""
     result = await db.execute(select(SystemConfig).where(SystemConfig.config_key == key))
@@ -63,14 +69,14 @@ async def get_notification_config_values(db: AsyncSession) -> dict[str, Any]:
     smtp_password = await get_config_value(db, "smtp_password", "")
     return {
         "email_enabled": await get_bool_config(db, "email_enabled", False),
-        "smtp_host": await get_config_value(db, "smtp_host", ""),
+        "smtp_host": _normalized_config_text(await get_config_value(db, "smtp_host", "")),
         "smtp_port": await get_int_config(db, "smtp_port", 587),
-        "smtp_user": await get_config_value(db, "smtp_user", ""),
+        "smtp_user": _normalized_config_text(await get_config_value(db, "smtp_user", "")),
         "smtp_password": smtp_password,
         "smtp_password_set": bool(smtp_password),
         "smtp_ssl": await get_bool_config(db, "smtp_ssl", True),
         "webhook_enabled": await get_bool_config(db, "webhook_enabled", False),
-        "webhook_url": await get_config_value(db, "webhook_url", ""),
+        "webhook_url": _normalized_config_text(await get_config_value(db, "webhook_url", "")),
     }
 
 

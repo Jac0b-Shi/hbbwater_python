@@ -89,6 +89,7 @@ class Sensor(BusinessBase):
     description = Column(Text)
     warning_level = Column(DECIMAL(10, 2))
     danger_level = Column(DECIMAL(10, 2))
+    threshold_condition = Column(String(32), nullable=True)
     normal_interval = Column(Integer, default=1800)
     alert_interval = Column(Integer, default=300)
     is_active = Column(Boolean, default=True)

@@ -6,10 +6,10 @@ from datetime import datetime
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy.exc import OperationalError
 
 from app.database import ControlBase, ControlSessionLocal, activate_business_database, control_engine, dispose_databases
-from app.routers import sensors, alerts, dashboard, config, account
+from app.routers import sensors, alerts, dashboard, config, account, auth
+from app.services.account import account_service
 from app.services.business_profiles import ensure_business_profiles_bootstrap, profile_to_settings
 
 
@@ -22,6 +22,7 @@ async def lifespan(app: FastAPI):
         await conn.run_sync(ControlBase.metadata.create_all)
 
     async with ControlSessionLocal() as control_db:
+        await account_service.ensure_bootstrap(control_db)
         profiles = await ensure_business_profiles_bootstrap(control_db)
         active_profile = next((profile for profile in profiles if profile.is_active), profiles[0])
 
@@ -32,16 +33,16 @@ async def lifespan(app: FastAPI):
         os.getenv("BUSINESS_DB_STARTUP_RETRY_DELAY_SECONDS", os.getenv("DB_STARTUP_RETRY_DELAY_SECONDS", "3"))
     )
 
-    last_error: OperationalError | None = None
+    last_error: Exception | None = None
     for attempt in range(1, max_attempts + 1):
         try:
             await activate_business_database(profile_to_settings(active_profile))
             last_error = None
             break
-        except OperationalError as exc:
+        except Exception as exc:
             last_error = exc
             if attempt == max_attempts:
-                raise
+                break
             print(
                 f"[{datetime.utcnow()}] Business database unavailable during startup "
                 f"(attempt {attempt}/{max_attempts}), retrying in {retry_delay}s..."
@@ -49,7 +50,10 @@ async def lifespan(app: FastAPI):
             await asyncio.sleep(retry_delay)
 
     if last_error is not None:
-        raise last_error
+        print(
+            f"[{datetime.utcnow()}] Business database startup deferred: {last_error}. "
+            "Control-plane endpoints will remain available."
+        )
 
     yield
 
@@ -102,6 +106,7 @@ app.include_router(alerts.router, prefix="/api")
 app.include_router(dashboard.router, prefix="/api")
 app.include_router(config.router, prefix="/api")
 app.include_router(account.router, prefix="/api")
+app.include_router(auth.router, prefix="/api")
 
 
 if __name__ == "__main__":

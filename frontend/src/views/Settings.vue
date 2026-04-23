@@ -40,7 +40,7 @@
           <el-form :model="notifyConfig" label-width="150px">
             <el-form-item label="邮件通知">
               <el-switch v-model="notifyConfig.email_enabled" />
-              <span class="form-hint" style="margin-left: 10px; color: #67c23a;">通过 WordPress 发送</span>
+              <span class="form-hint" style="margin-left: 10px; color: #67c23a;">优先使用 SMTP，失败时回退 WordPress 网关</span>
             </el-form-item>
             <el-form-item label="SMTP服务器">
               <el-input v-model="notifyConfig.smtp_host" placeholder="smtp.example.com" />
@@ -104,9 +104,26 @@
               <el-input v-model="notifyConfig.webhook_url" placeholder="https://example.com/webhook" />
             </el-form-item>
             <el-form-item>
-              <el-button type="primary" @click="testWebhook" :disabled="!notifyConfig.webhook_enabled || !notifyConfig.webhook_url.trim()">
+              <el-alert
+                title="Webhook 将收到统一 JSON 负载，包含 event、sensor、alert、reading、sent_at 等字段。"
+                type="info"
+                :closable="false"
+                show-icon
+              />
+            </el-form-item>
+            <el-form-item>
+              <el-button
+                type="primary"
+                @click="testWebhook"
+                :disabled="!notifyConfigReady || !notifyConfig.webhook_enabled || !notifyConfig.webhook_url.trim()"
+                :loading="testingWebhook"
+              >
                 测试 Webhook
               </el-button>
+              <el-button @click="saveNotifyConfig" :disabled="!notifyConfigReady" :loading="savingNotifyConfig">
+                保存配置
+              </el-button>
+              <span class="form-hint">测试前会自动保存当前填写内容</span>
             </el-form-item>
           </el-form>
         </el-card>
@@ -126,6 +143,15 @@
           <el-alert
             title="管理员、通知配置和数据库 profile 固定保存在本地控制库 SQLite；传感器、读数、告警和统计数据写入当前激活的业务数据库。"
             type="info"
+            show-icon
+            :closable="false"
+            class="mb-4"
+          />
+          <el-alert
+            v-if="businessDbState.runtime.last_error"
+            title="当前业务数据库尚未就绪，但控制库 SQLite 已可正常使用"
+            :description="businessDbState.runtime.last_error"
+            type="warning"
             show-icon
             :closable="false"
             class="mb-4"
@@ -245,6 +271,14 @@
           <template #header>
             <span>业务数据库统计</span>
           </template>
+          <el-alert
+            v-if="businessStatsUnavailable"
+            title="业务数据库统计暂不可用"
+            type="warning"
+            show-icon
+            :closable="false"
+            class="mb-4"
+          />
           <el-descriptions :column="4" border>
             <el-descriptions-item label="热数据表">{{ dbStats.readings_count?.toLocaleString() }} 条</el-descriptions-item>
             <el-descriptions-item label="归档数据">{{ dbStats.archive_count?.toLocaleString() }} 条</el-descriptions-item>
@@ -318,6 +352,7 @@ const notifyConfig = ref({
 const notifyConfigReady = ref(false)
 const savingNotifyConfig = ref(false)
 const testingEmail = ref(false)
+const testingWebhook = ref(false)
 const smtpPasswordDraft = ref('')
 const smtpPasswordFieldKey = ref(0)
 const testEmailAddress = ref('')
@@ -329,7 +364,9 @@ const businessDbState = ref({
     dialect: '',
     database: '',
     host: '',
-    service_name: ''
+    service_name: '',
+    configured: false,
+    last_error: ''
   },
   profiles: []
 })
@@ -347,6 +384,7 @@ const dbStats = ref({
   hourly_count: 0,
   daily_count: 0
 })
+const businessStatsUnavailable = ref(false)
 
 const maintenanceLoading = ref(false)
 const optimizeLoading = ref(false)
@@ -394,6 +432,7 @@ const optimizeTooltip = computed(() => (
     : `当前业务库为 ${businessDbState.value.runtime.dialect || '未知'}，暂未实现在线优化`
 ))
 const runtimeTagType = computed(() => {
+  if (businessDbState.value.runtime.last_error) return 'danger'
   if (businessDbState.value.runtime.dialect === 'dm') return 'success'
   if (businessDbState.value.runtime.dialect === 'mysql') return 'warning'
   return 'info'
@@ -432,6 +471,40 @@ const resetBusinessPasswordDraft = () => {
 }
 
 const formatDateTime = (value) => value ? dayjs(value).format('YYYY-MM-DD HH:mm:ss') : '-'
+
+const buildNotifyConfigPayload = () => {
+  const payload = {
+    email_enabled: notifyConfig.value.email_enabled,
+    smtp_host: notifyConfig.value.smtp_host.trim(),
+    smtp_port: notifyConfig.value.smtp_port,
+    smtp_user: notifyConfig.value.smtp_user.trim(),
+    smtp_ssl: notifyConfig.value.smtp_ssl,
+    webhook_enabled: notifyConfig.value.webhook_enabled,
+    webhook_url: notifyConfig.value.webhook_url.trim()
+  }
+
+  const password = smtpPasswordDraft.value.trim()
+  if (password) {
+    payload.smtp_password = password
+  }
+
+  return payload
+}
+
+const applySavedNotifyConfig = (payload) => {
+  notifyConfig.value = {
+    ...notifyConfig.value,
+    ...payload,
+    smtp_password_set: Boolean(payload.smtp_password || notifyConfig.value.smtp_password_set)
+  }
+}
+
+const submitNotifyConfig = async () => {
+  const payload = buildNotifyConfigPayload()
+  await axios.post('/api/config/notification', payload)
+  applySavedNotifyConfig(payload)
+  resetSmtpPasswordDraft()
+}
 
 const applyBusinessProfileForm = (profile) => {
   if (!profile) {
@@ -495,17 +568,34 @@ const buildBusinessProfilePayload = (extra = {}) => {
 }
 
 const loadSettings = async () => {
-  const [systemRes, notifyRes, statsRes, businessRes] = await Promise.all([
+  const [systemRes, notifyRes, businessRes, statsRes] = await Promise.allSettled([
     axios.get('/api/config/system'),
     axios.get('/api/config/notification'),
-    axios.get('/api/config/database/stats'),
-    axios.get('/api/config/business-database')
+    axios.get('/api/config/business-database'),
+    axios.get('/api/config/database/stats')
   ])
 
-  systemConfig.value = { ...systemConfig.value, ...systemRes.data }
-  notifyConfig.value = { ...notifyConfig.value, ...notifyRes.data }
-  dbStats.value = { ...dbStats.value, ...statsRes.data }
-  syncBusinessDatabaseState(businessRes.data)
+  if (systemRes.status !== 'fulfilled') throw systemRes.reason
+  if (notifyRes.status !== 'fulfilled') throw notifyRes.reason
+  if (businessRes.status !== 'fulfilled') throw businessRes.reason
+
+  systemConfig.value = { ...systemConfig.value, ...systemRes.value.data }
+  notifyConfig.value = { ...notifyConfig.value, ...notifyRes.value.data }
+  syncBusinessDatabaseState(businessRes.value.data)
+
+  if (statsRes.status === 'fulfilled') {
+    dbStats.value = { ...dbStats.value, ...statsRes.value.data }
+    businessStatsUnavailable.value = false
+  } else {
+    dbStats.value = {
+      readings_count: 0,
+      archive_count: 0,
+      hourly_count: 0,
+      daily_count: 0
+    }
+    businessStatsUnavailable.value = true
+  }
+
   resetSmtpPasswordDraft()
   notifyConfigReady.value = true
 }
@@ -522,24 +612,7 @@ const saveSystemConfig = async () => {
 const saveNotifyConfig = async () => {
   savingNotifyConfig.value = true
   try {
-    const payload = {
-      email_enabled: notifyConfig.value.email_enabled,
-      smtp_host: notifyConfig.value.smtp_host,
-      smtp_port: notifyConfig.value.smtp_port,
-      smtp_user: notifyConfig.value.smtp_user,
-      smtp_ssl: notifyConfig.value.smtp_ssl,
-      webhook_enabled: notifyConfig.value.webhook_enabled,
-      webhook_url: notifyConfig.value.webhook_url
-    }
-
-    const password = smtpPasswordDraft.value.trim()
-    if (password) {
-      payload.smtp_password = password
-    }
-
-    await axios.post('/api/config/notification', payload)
-    resetSmtpPasswordDraft()
-    notifyConfig.value.smtp_password_set = Boolean(password || notifyConfig.value.smtp_password_set)
+    await submitNotifyConfig()
     ElMessage.success('通知配置已保存')
   } catch (error) {
     ElMessage.error('保存失败: ' + getErrorMessage(error))
@@ -571,6 +644,7 @@ const testEmail = async () => {
   }
   testingEmail.value = true
   try {
+    await submitNotifyConfig()
     const response = await axios.post('/api/config/notification/test-email', { to })
     ElMessage.success(response.data.message || '测试邮件已发送')
   } catch (error) {
@@ -581,11 +655,15 @@ const testEmail = async () => {
 }
 
 const testWebhook = async () => {
+  testingWebhook.value = true
   try {
+    await submitNotifyConfig()
     await axios.post('/api/config/notification/test-webhook')
     ElMessage.success('测试 Webhook 已发送')
   } catch (error) {
     ElMessage.error('发送失败: ' + getErrorMessage(error))
+  } finally {
+    testingWebhook.value = false
   }
 }
 

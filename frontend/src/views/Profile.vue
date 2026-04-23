@@ -6,13 +6,14 @@
           <div class="profile-header">
             <el-avatar :size="100" :src="accountStore.avatarUrl" :icon="UserFilled" />
             <h3>{{ accountStore.displayName }}</h3>
-            <p class="profile-role">{{ accountStore.profile?.role || '系统管理员' }}</p>
+            <p class="profile-role">{{ accountStore.roleLabel }}</p>
           </div>
           <div class="profile-info">
             <p><el-icon><Message /></el-icon> {{ accountStore.profile?.email || '-' }}</p>
             <p><el-icon><Phone /></el-icon> {{ accountStore.profile?.phone || '未设置' }}</p>
             <p><el-icon><Timer /></el-icon> 注册时间：{{ createdAtText }}</p>
             <p><el-icon><Connection /></el-icon> 认证方式：{{ accountStore.authProviderLabel }}</p>
+            <p><el-icon><Key /></el-icon> 权限：{{ permissionSummary }}</p>
           </div>
         </el-card>
       </el-col>
@@ -42,9 +43,6 @@
             </el-form-item>
             <el-form-item label="手机号">
               <el-input v-model="profileForm.phone" placeholder="请输入手机号" />
-            </el-form-item>
-            <el-form-item label="角色">
-              <el-input v-model="profileForm.role" placeholder="请输入角色名称" />
             </el-form-item>
             <el-form-item>
               <el-button type="primary" :loading="accountStore.saving" @click="saveProfile">保存修改</el-button>
@@ -90,7 +88,7 @@
 
         <el-card shadow="hover" class="mt-4">
           <template #header>
-            <span>认证扩展预留</span>
+            <span>认证与权限</span>
           </template>
           <div class="provider-list">
             <div
@@ -108,6 +106,15 @@
               </el-tag>
             </div>
           </div>
+          <el-divider />
+          <div class="permission-chips">
+            <el-tag v-for="permission in accountStore.permissions" :key="permission" effect="plain">
+              {{ permission }}
+            </el-tag>
+            <el-tag v-if="!accountStore.permissions.length" effect="plain" type="info">
+              只读访问
+            </el-tag>
+          </div>
         </el-card>
       </el-col>
     </el-row>
@@ -118,8 +125,9 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import dayjs from 'dayjs'
 import { ElMessage } from 'element-plus'
-import { UserFilled, Message, Phone, Timer, Connection } from '@element-plus/icons-vue'
+import { UserFilled, Message, Phone, Timer, Connection, Key } from '@element-plus/icons-vue'
 import { useAccountStore } from '../stores/account'
+import { validatePassword } from '../utils/password'
 
 const accountStore = useAccountStore()
 const profileForm = ref({
@@ -127,7 +135,6 @@ const profileForm = ref({
   display_name: '',
   email: '',
   phone: '',
-  role: ''
 })
 
 const passwordForm = ref({
@@ -141,6 +148,13 @@ const createdAtText = computed(() => {
   return value ? dayjs(value).format('YYYY-MM-DD HH:mm') : '-'
 })
 
+const permissionSummary = computed(() => {
+  if (!accountStore.permissions.length) {
+    return '只读访问'
+  }
+  return accountStore.permissions.join(' / ')
+})
+
 function syncProfileForm() {
   const profile = accountStore.profile
   if (!profile) return
@@ -149,8 +163,7 @@ function syncProfileForm() {
     username: profile.username || '',
     display_name: profile.display_name || '',
     email: profile.email || '',
-    phone: profile.phone || '',
-    role: profile.role || ''
+    phone: profile.phone || ''
   }
 }
 
@@ -170,8 +183,12 @@ const changePassword = async () => {
     return
   }
 
-  if (passwordForm.value.new.length < 8) {
-    ElMessage.error('新密码长度不能少于 8 位')
+  const passwordError = validatePassword(passwordForm.value.new, {
+    requiredMessage: '请输入新密码',
+    minimumMessage: '新密码长度不能少于 8 位'
+  })
+  if (passwordError) {
+    ElMessage.error(passwordError)
     return
   }
 
@@ -242,6 +259,12 @@ watch(() => accountStore.profile, syncProfileForm)
 .provider-list {
   display: grid;
   gap: 12px;
+}
+
+.permission-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
 .provider-item {

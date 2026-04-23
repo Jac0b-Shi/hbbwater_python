@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_control_db, get_db
 from app.models import Sensor, SensorReading, Alert, SensorType
 from app.schemas import DashboardStats, SensorStatus
+from app.services.auth import get_current_user
 from app.services.system_config import get_offline_timeout_minutes
 from app.services.text import repair_mojibake
 
@@ -17,6 +18,7 @@ router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
 @router.get("/stats", response_model=DashboardStats)
 async def get_dashboard_stats(
+    _: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     control_db: AsyncSession = Depends(get_control_db),
 ):
@@ -36,14 +38,20 @@ async def get_dashboard_stats(
     
     # Active alerts
     alerts_result = await db.execute(
-        select(func.count()).where(Alert.is_resolved == False)
+        select(func.count())
+        .select_from(Alert)
+        .join(Sensor, Alert.sensor_id == Sensor.sensor_id)
+        .where(Alert.is_resolved == False)
     )
     active_alerts = alerts_result.scalar()
     
     # Today's readings
     today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
     readings_result = await db.execute(
-        select(func.count()).where(SensorReading.recorded_at >= today)
+        select(func.count())
+        .select_from(SensorReading)
+        .join(Sensor, SensorReading.sensor_id == Sensor.sensor_id)
+        .where(SensorReading.recorded_at >= today)
     )
     today_readings = readings_result.scalar()
     
@@ -52,10 +60,14 @@ async def get_dashboard_stats(
     offline_threshold = datetime.utcnow() - timedelta(minutes=offline_timeout_minutes)
     
     # Get latest reading time for each sensor
-    latest_readings_query = select(
-        SensorReading.sensor_id,
-        func.max(SensorReading.recorded_at).label("last_reading")
-    ).group_by(SensorReading.sensor_id)
+    latest_readings_query = (
+        select(
+            SensorReading.sensor_id,
+            func.max(SensorReading.recorded_at).label("last_reading")
+        )
+        .join(Sensor, SensorReading.sensor_id == Sensor.sensor_id)
+        .group_by(SensorReading.sensor_id)
+    )
     
     latest_result = await db.execute(latest_readings_query)
     latest_times = {row[0]: row[1] for row in latest_result.all()}
@@ -79,6 +91,7 @@ async def get_dashboard_stats(
 
 @router.get("/sensor-status", response_model=List[SensorStatus])
 async def get_all_sensors_status(
+    _: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     control_db: AsyncSession = Depends(get_control_db),
 ):
@@ -122,7 +135,11 @@ async def get_all_sensors_status(
 
 
 @router.get("/recent-readings")
-async def get_recent_readings(limit: int = 20, db: AsyncSession = Depends(get_db)):
+async def get_recent_readings(
+    limit: int = 20,
+    _: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """Get recent sensor readings across all sensors."""
     query = select(
         SensorReading,
@@ -157,7 +174,11 @@ async def get_recent_readings(limit: int = 20, db: AsyncSession = Depends(get_db
 
 
 @router.get("/alerts/recent")
-async def get_recent_alerts(limit: int = 10, db: AsyncSession = Depends(get_db)):
+async def get_recent_alerts(
+    limit: int = 10,
+    _: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """Get recent active alerts."""
     query = select(
         Alert,

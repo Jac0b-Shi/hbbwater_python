@@ -2,6 +2,8 @@
 
 基于双数据库分层存储、Vue + WordPress 前后端分离的完整技术方案。
 
+组 Webhook 转发服务接入请参考 [GROUP_WEBHOOK_PROTOCOL.md](GROUP_WEBHOOK_PROTOCOL.md)。
+
 ## 系统架构
 
 ```

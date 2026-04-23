@@ -9,8 +9,8 @@ WORKDIR /app
 # 复制 package.json 和 package-lock.json
 COPY package*.json ./
 
-# 安装依赖（构建阶段需要 devDependencies）
-RUN npm install
+# 用锁文件安装完整依赖，避免构建阶段遗漏 vite 等 devDependencies
+RUN npm ci --include=dev --no-audit --no-fund
 
 # 复制源代码
 COPY . .

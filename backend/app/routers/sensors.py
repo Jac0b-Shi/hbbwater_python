@@ -16,10 +16,18 @@ from app.schemas import (
     WebhookDataInput, GroupWebhookDataInput,
     WebhookGroupCreate, WebhookGroupUpdate, WebhookGroupResponse, WebhookGroupDetail
 )
+from app.services.alerting import (
+    get_threshold_configuration_error,
+    handle_sensor_reading_alerts,
+    infer_ultrasonic_status,
+    is_threshold_configuration_valid,
+)
+from app.services.auth import get_current_user, require_roles
 from app.services.system_config import get_offline_timeout_minutes
 import uuid
 
 router = APIRouter(prefix="/sensors", tags=["sensors"])
+require_sensor_manager = require_roles("super_admin", "admin")
 
 WEBHOOK_REPORT_METHODS = {
     ReportMethod.WEBHOOK.value,
@@ -90,11 +98,24 @@ def validate_sensor_payload(sensor_data: dict, existing_sensor: Optional[Sensor]
     report_method = sensor_data.get("report_method", existing_sensor.report_method if existing_sensor else None)
     webhook_group_id = sensor_data.get("webhook_group_id", existing_sensor.webhook_group_id if existing_sensor else None)
     device_imei = sensor_data.get("device_imei", existing_sensor.device_imei if existing_sensor else None)
+    sensor_type = sensor_data.get("sensor_type", existing_sensor.sensor_type if existing_sensor else None)
+    warning_level = sensor_data.get("warning_level", existing_sensor.warning_level if existing_sensor else None)
+    danger_level = sensor_data.get("danger_level", existing_sensor.danger_level if existing_sensor else None)
+    threshold_condition = sensor_data.get(
+        "threshold_condition",
+        existing_sensor.threshold_condition if existing_sensor else None,
+    )
 
     if report_method == ReportMethod.UDP_BINARY.value and not device_imei:
         raise HTTPException(status_code=400, detail="UDP binary group webhook requires a bound device IMEI")
     if webhook_group_id and not device_imei:
         raise HTTPException(status_code=400, detail="Grouped sensors require a bound device IMEI")
+    if sensor_type == SensorType.ULTRASONIC.value and not is_threshold_configuration_valid(
+        warning_level,
+        danger_level,
+        threshold_condition,
+    ):
+        raise HTTPException(status_code=400, detail=get_threshold_configuration_error(threshold_condition))
 
 
 def extract_device_imei(payload: GroupWebhookDataInput) -> Optional[str]:
@@ -126,17 +147,6 @@ def extract_group_water_level(payload: GroupWebhookDataInput) -> Optional[float]
     return None
 
 
-def infer_ultrasonic_status(sensor: Sensor, water_level: float) -> str:
-    """Infer status from configured thresholds when the relay does not provide one."""
-    danger_level = float(sensor.danger_level) if sensor.danger_level is not None else None
-    warning_level = float(sensor.warning_level) if sensor.warning_level is not None else None
-    if danger_level is not None and water_level >= danger_level:
-        return "danger"
-    if warning_level is not None and water_level >= warning_level:
-        return "warning"
-    return "normal"
-
-
 def build_group_sensor_reading(sensor: Sensor, payload: GroupWebhookDataInput, device_imei: str) -> SensorReading:
     """Convert a group webhook payload into a normalized reading."""
     sensor_type = get_sensor_type_value(sensor.sensor_type)
@@ -148,7 +158,7 @@ def build_group_sensor_reading(sensor: Sensor, payload: GroupWebhookDataInput, d
         water_level = extract_group_water_level(payload)
         if water_level is None:
             raise HTTPException(status_code=422, detail="Ultrasonic group webhook data requires water_level or another measurement field")
-        status = payload.status or infer_ultrasonic_status(sensor, water_level)
+        status = infer_ultrasonic_status(sensor, water_level, fallback_status=payload.status)
         return SensorReading(
             sensor_id=sensor.sensor_id,
             sensor_type=sensor_type,
@@ -187,7 +197,10 @@ def serialize_group(group: WebhookGroup) -> WebhookGroupDetail:
 
 
 @router.get("/groups", response_model=List[WebhookGroupDetail])
-async def list_webhook_groups(db: AsyncSession = Depends(get_db)):
+async def list_webhook_groups(
+    _: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """List webhook groups with their member sensors."""
     result = await db.execute(
         select(WebhookGroup)
@@ -199,7 +212,11 @@ async def list_webhook_groups(db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/groups", response_model=WebhookGroupResponse, status_code=201)
-async def create_webhook_group(group: WebhookGroupCreate, db: AsyncSession = Depends(get_db)):
+async def create_webhook_group(
+    group: WebhookGroupCreate,
+    _: dict = Depends(require_sensor_manager),
+    db: AsyncSession = Depends(get_db),
+):
     """Create a standalone webhook group."""
     token = (group.webhook_token or generate_webhook_token()).strip()
     token_result = await db.execute(select(WebhookGroup).where(WebhookGroup.webhook_token == token))
@@ -219,7 +236,12 @@ async def create_webhook_group(group: WebhookGroupCreate, db: AsyncSession = Dep
 
 
 @router.patch("/groups/{group_id}", response_model=WebhookGroupResponse)
-async def update_webhook_group(group_id: int, group_update: WebhookGroupUpdate, db: AsyncSession = Depends(get_db)):
+async def update_webhook_group(
+    group_id: int,
+    group_update: WebhookGroupUpdate,
+    _: dict = Depends(require_sensor_manager),
+    db: AsyncSession = Depends(get_db),
+):
     """Update a webhook group."""
     result = await db.execute(select(WebhookGroup).where(WebhookGroup.id == group_id))
     group = result.scalar_one_or_none()
@@ -246,7 +268,11 @@ async def update_webhook_group(group_id: int, group_update: WebhookGroupUpdate, 
 
 
 @router.delete("/groups/{group_id}", status_code=204)
-async def delete_webhook_group(group_id: int, db: AsyncSession = Depends(get_db)):
+async def delete_webhook_group(
+    group_id: int,
+    _: dict = Depends(require_sensor_manager),
+    db: AsyncSession = Depends(get_db),
+):
     """Delete a webhook group and detach member sensors."""
     result = await db.execute(select(WebhookGroup).where(WebhookGroup.id == group_id))
     group = result.scalar_one_or_none()
@@ -280,6 +306,11 @@ def build_sensor_reading(sensor: Sensor, payload: SensorDataInput | WebhookDataI
     if sensor_type == SensorType.ULTRASONIC.value:
         if payload.water_level is None:
             raise HTTPException(status_code=422, detail="Ultrasonic sensor data requires water_level")
+        reading_data["status"] = infer_ultrasonic_status(
+            sensor,
+            float(payload.water_level),
+            fallback_status=payload.status,
+        )
         reading_data.update({
             "water_level": payload.water_level,
             "battery_level": payload.battery_level,
@@ -288,6 +319,7 @@ def build_sensor_reading(sensor: Sensor, payload: SensorDataInput | WebhookDataI
     else:
         if payload.water_detected is None:
             raise HTTPException(status_code=422, detail="Immersion sensor data requires water_detected")
+        reading_data["status"] = "warning" if payload.water_detected else (payload.status or "normal")
         reading_data.update({
             "water_detected": payload.water_detected,
             "duration": payload.duration,
@@ -303,6 +335,7 @@ def build_sensor_reading(sensor: Sensor, payload: SensorDataInput | WebhookDataI
 async def list_sensors(
     sensor_type: Optional[str] = None,
     is_active: Optional[bool] = None,
+    _: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Get all sensors with optional filtering."""
@@ -318,7 +351,11 @@ async def list_sensors(
 
 
 @router.get("/{sensor_id}", response_model=SensorResponse)
-async def get_sensor(sensor_id: str, db: AsyncSession = Depends(get_db)):
+async def get_sensor(
+    sensor_id: str,
+    _: dict = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
     """Get a specific sensor by ID."""
     result = await db.execute(
         select(Sensor).options(selectinload(Sensor.webhook_group)).where(Sensor.sensor_id == sensor_id)
@@ -331,7 +368,11 @@ async def get_sensor(sensor_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/", response_model=SensorResponse, status_code=201)
-async def create_sensor(sensor: SensorCreate, db: AsyncSession = Depends(get_db)):
+async def create_sensor(
+    sensor: SensorCreate,
+    _: dict = Depends(require_sensor_manager),
+    db: AsyncSession = Depends(get_db),
+):
     """Create a new sensor."""
     # Check if sensor_id already exists
     result = await db.execute(select(Sensor).where(Sensor.sensor_id == sensor.sensor_id))
@@ -374,6 +415,7 @@ async def create_sensor(sensor: SensorCreate, db: AsyncSession = Depends(get_db)
 async def update_sensor(
     sensor_id: str, 
     sensor_update: SensorUpdate, 
+    _: dict = Depends(require_sensor_manager),
     db: AsyncSession = Depends(get_db)
 ):
     """Update a sensor configuration."""
@@ -425,7 +467,11 @@ async def update_sensor(
 
 
 @router.delete("/{sensor_id}", status_code=204)
-async def delete_sensor(sensor_id: str, db: AsyncSession = Depends(get_db)):
+async def delete_sensor(
+    sensor_id: str,
+    _: dict = Depends(require_sensor_manager),
+    db: AsyncSession = Depends(get_db),
+):
     """Delete a sensor."""
     result = await db.execute(select(Sensor).where(Sensor.sensor_id == sensor_id))
     sensor = result.scalar_one_or_none()
@@ -438,7 +484,11 @@ async def delete_sensor(sensor_id: str, db: AsyncSession = Depends(get_db)):
 
 
 @router.post("/data", response_model=dict, status_code=201)
-async def receive_sensor_data(data: SensorDataInput, db: AsyncSession = Depends(get_db)):
+async def receive_sensor_data(
+    data: SensorDataInput,
+    db: AsyncSession = Depends(get_db),
+    control_db: AsyncSession = Depends(get_control_db),
+):
     """Receive sensor data from devices."""
     # Check if sensor exists
     result = await db.execute(select(Sensor).where(Sensor.sensor_id == data.sensor_id))
@@ -456,6 +506,13 @@ async def receive_sensor_data(data: SensorDataInput, db: AsyncSession = Depends(
 
     reading = build_sensor_reading(sensor, data)
     db.add(reading)
+    await db.flush()
+    await handle_sensor_reading_alerts(
+        db,
+        control_db,
+        sensor=sensor,
+        reading=reading,
+    )
     await db.commit()
     await db.refresh(reading)
     
@@ -468,6 +525,7 @@ async def receive_sensor_data(data: SensorDataInput, db: AsyncSession = Depends(
 
 @router.get("/status/all", response_model=List[SensorStatus])
 async def get_all_sensors_status(
+    _: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
     control_db: AsyncSession = Depends(get_control_db),
 ):
@@ -512,7 +570,12 @@ async def get_all_sensors_status(
 
 
 @router.post("/webhook/{token}", response_model=dict, status_code=201)
-async def receive_webhook_data(token: str, data: WebhookDataInput, db: AsyncSession = Depends(get_db)):
+async def receive_webhook_data(
+    token: str,
+    data: WebhookDataInput,
+    db: AsyncSession = Depends(get_db),
+    control_db: AsyncSession = Depends(get_control_db),
+):
     """Receive sensor data via webhook token."""
     result = await db.execute(select(Sensor).where(Sensor.webhook_token == token))
     sensor = result.scalar_one_or_none()
@@ -525,6 +588,13 @@ async def receive_webhook_data(token: str, data: WebhookDataInput, db: AsyncSess
 
     reading = build_sensor_reading(sensor, data)
     db.add(reading)
+    await db.flush()
+    await handle_sensor_reading_alerts(
+        db,
+        control_db,
+        sensor=sensor,
+        reading=reading,
+    )
     await db.commit()
     await db.refresh(reading)
 
@@ -537,7 +607,12 @@ async def receive_webhook_data(token: str, data: WebhookDataInput, db: AsyncSess
 
 
 @router.post("/group-webhook/{token}", response_model=dict, status_code=201)
-async def receive_group_webhook_data(token: str, data: GroupWebhookDataInput, db: AsyncSession = Depends(get_db)):
+async def receive_group_webhook_data(
+    token: str,
+    data: GroupWebhookDataInput,
+    db: AsyncSession = Depends(get_db),
+    control_db: AsyncSession = Depends(get_control_db),
+):
     """Receive a shared webhook payload and route it to a sensor via device IMEI."""
     device_imei = extract_device_imei(data)
     if not device_imei:
@@ -566,6 +641,13 @@ async def receive_group_webhook_data(token: str, data: GroupWebhookDataInput, db
 
     reading = build_group_sensor_reading(sensor, data, device_imei)
     db.add(reading)
+    await db.flush()
+    await handle_sensor_reading_alerts(
+        db,
+        control_db,
+        sensor=sensor,
+        reading=reading,
+    )
     await db.commit()
     await db.refresh(reading)
 
@@ -585,6 +667,7 @@ async def get_sensor_readings(
     end_time: Optional[datetime] = None,
     limit: int = Query(100, ge=1, le=10000),
     page: int = Query(1, ge=1),
+    _: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Get readings for a specific sensor with time range filtering."""
@@ -621,6 +704,7 @@ async def get_sensor_timeseries(
     sensor_id: str,
     field: str = Query("water_level", pattern="^(water_level|battery_level|signal_strength|water_detected)$"),
     hours: int = Query(24, ge=1, le=168),
+    _: dict = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
     """Get time series data for a sensor (for charting)."""

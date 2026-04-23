@@ -2,6 +2,7 @@
 import os
 import sys
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 CURRENT_DIR = os.path.dirname(__file__)
@@ -31,7 +32,16 @@ try:
     )
     from app.schemas import GroupWebhookDataInput
     from app.services.account import build_gravatar
+    from app.services.alerting import (
+        infer_ultrasonic_status,
+        is_threshold_configuration_valid,
+    )
     from app.services.internal_auth import get_internal_api_token
+    from app.services.notifications import (
+        _build_outgoing_payload,
+        _extract_webhook_error,
+        _is_wecom_webhook_url,
+    )
 except ModuleNotFoundError as exc:  # pragma: no cover - environment-dependent
     IMPORT_ERROR = exc
 
@@ -58,6 +68,28 @@ class SmokeTests(unittest.TestCase):
         self.assertTrue(extract_water_detected(payload))
         ultrasonic_payload = GroupWebhookDataInput(sensor_value="128.4")
         self.assertEqual(extract_group_water_level(ultrasonic_payload), 128.4)
+
+    def test_ultrasonic_status_supports_less_or_equal_thresholds(self):
+        sensor = SimpleNamespace(
+            warning_level=50,
+            danger_level=30,
+            threshold_condition="less_or_equal",
+        )
+        self.assertEqual(infer_ultrasonic_status(sensor, 45.0), "warning")
+        self.assertEqual(infer_ultrasonic_status(sensor, 25.0), "danger")
+        self.assertTrue(is_threshold_configuration_valid(50, 30, "less_or_equal"))
+        self.assertFalse(is_threshold_configuration_valid(30, 50, "less_or_equal"))
+
+    def test_ultrasonic_status_supports_greater_or_equal_thresholds(self):
+        sensor = SimpleNamespace(
+            warning_level=30,
+            danger_level=50,
+            threshold_condition="greater_or_equal",
+        )
+        self.assertEqual(infer_ultrasonic_status(sensor, 35.0), "warning")
+        self.assertEqual(infer_ultrasonic_status(sensor, 55.0), "danger")
+        self.assertTrue(is_threshold_configuration_valid(30, 50, "greater_or_equal"))
+        self.assertFalse(is_threshold_configuration_valid(50, 30, "greater_or_equal"))
 
     def test_get_internal_api_token_reads_environment(self):
         with patch.dict(os.environ, {"INTERNAL_API_TOKEN": "shared-token"}):
@@ -156,6 +188,29 @@ class SmokeTests(unittest.TestCase):
     def test_should_auto_create_schema_honors_override(self):
         with patch.dict(os.environ, {"AUTO_CREATE_SCHEMA": "true"}, clear=False):
             self.assertTrue(should_auto_create_schema("dm"))
+
+    def test_empty_business_auto_create_schema_is_treated_as_unset(self):
+        with patch.dict(os.environ, {"BUSINESS_AUTO_CREATE_SCHEMA": ""}, clear=False):
+            settings = build_business_database_settings_from_env()
+            self.assertIsNone(settings.auto_create_schema)
+
+    def test_wecom_webhook_payload_uses_text_message_format(self):
+        url = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=unit-test"
+        payload = _build_outgoing_payload(
+            url,
+            {
+                "event": "notification.test",
+                "sent_at": "2026-04-23T00:00:00",
+                "message": "hello",
+            },
+        )
+        self.assertTrue(_is_wecom_webhook_url(url))
+        self.assertEqual(payload["msgtype"], "text")
+        self.assertIn("hello", payload["text"]["content"])
+
+    def test_wecom_webhook_error_body_is_not_treated_as_success(self):
+        response = SimpleNamespace(json=lambda: {"errcode": 40008, "errmsg": "invalid msgtype"})
+        self.assertIn("40008", _extract_webhook_error(response))
 
 
 if __name__ == "__main__":

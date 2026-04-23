@@ -1,5 +1,7 @@
 <template>
-  <div class="app-wrapper">
+  <router-view v-if="isAuthLayout" />
+
+  <div v-else class="app-wrapper">
     <el-container class="main-container">
       <el-aside width="220px" class="sidebar">
         <div class="logo">
@@ -17,7 +19,7 @@
             <el-icon><Odometer /></el-icon>
             <template #title>监控仪表盘</template>
           </el-menu-item>
-          
+
           <el-sub-menu index="/sensors">
             <template #title>
               <el-icon><Cpu /></el-icon>
@@ -27,7 +29,7 @@
             <el-menu-item index="/sensors/ultrasonic">超声波传感器</el-menu-item>
             <el-menu-item index="/sensors/immersion">浸水传感器</el-menu-item>
           </el-sub-menu>
-          
+
           <el-menu-item index="/alerts">
             <el-icon><Bell /></el-icon>
             <template #title>
@@ -35,23 +37,29 @@
               <el-badge v-if="alertStore.unresolvedCount > 0" :value="alertStore.unresolvedCount" class="alert-badge" />
             </template>
           </el-menu-item>
-          
+
           <el-menu-item index="/history">
             <el-icon><TrendCharts /></el-icon>
             <template #title>历史数据</template>
           </el-menu-item>
-          
-          <el-menu-item index="/settings">
+
+          <el-menu-item v-if="accountStore.canManageUsers" index="/users">
+            <el-icon><UserFilled /></el-icon>
+            <template #title>用户管理</template>
+          </el-menu-item>
+
+          <el-menu-item v-if="accountStore.canAccessSettings" index="/settings">
             <el-icon><Setting /></el-icon>
             <template #title>系统设置</template>
           </el-menu-item>
         </el-menu>
-        
+
         <div class="sidebar-footer">
+          <el-tag size="small" type="info">{{ accountStore.roleLabel }}</el-tag>
           <el-text type="info" size="small">v1.0.0</el-text>
         </div>
       </el-aside>
-      
+
       <el-container>
         <el-header class="main-header">
           <div class="header-left">
@@ -62,6 +70,7 @@
             <breadcrumb />
           </div>
           <div class="header-right">
+            <el-tag v-if="!accountStore.canManageSensors" effect="plain" round>只读模式</el-tag>
             <el-tooltip content="刷新数据" placement="bottom">
               <el-icon class="header-icon" @click="refreshData"><Refresh /></el-icon>
             </el-tooltip>
@@ -77,13 +86,15 @@
               <template #dropdown>
                 <el-dropdown-menu>
                   <el-dropdown-item @click="$router.push('/profile')">个人设置</el-dropdown-item>
-                  <el-dropdown-item divided>退出登录</el-dropdown-item>
+                  <el-dropdown-item v-if="accountStore.canManageUsers" @click="$router.push('/users')">用户管理</el-dropdown-item>
+                  <el-dropdown-item v-if="accountStore.canAccessSettings" @click="$router.push('/settings')">系统设置</el-dropdown-item>
+                  <el-dropdown-item divided @click="handleLogout">退出登录</el-dropdown-item>
                 </el-dropdown-menu>
               </template>
             </el-dropdown>
           </div>
         </el-header>
-        
+
         <el-main class="main-content">
           <router-view v-slot="{ Component }">
             <transition name="fade-transform" mode="out-in">
@@ -97,19 +108,21 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
+import { computed, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useAlertStore } from './stores/alerts'
 import { useAccountStore } from './stores/account'
 import Breadcrumb from './components/Breadcrumb.vue'
 
 const route = useRoute()
+const router = useRouter()
 const alertStore = useAlertStore()
 const accountStore = useAccountStore()
 
 const isCollapse = ref(false)
 
 const activeMenu = computed(() => route.path)
+const isAuthLayout = computed(() => route.meta.layout === 'auth')
 
 const toggleCollapse = () => {
   isCollapse.value = !isCollapse.value
@@ -127,11 +140,10 @@ const toggleFullscreen = () => {
   }
 }
 
-onMounted(() => {
-  accountStore.fetchProfile().catch((err) => {
-    console.error('Failed to initialize account profile:', err)
-  })
-})
+const handleLogout = async () => {
+  await accountStore.logout()
+  router.push('/login')
+}
 </script>
 
 <style scoped>
@@ -193,6 +205,8 @@ onMounted(() => {
   padding: 16px;
   text-align: center;
   border-top: 1px solid rgba(255,255,255,0.1);
+  display: grid;
+  gap: 10px;
 }
 
 .main-header {
@@ -259,7 +273,6 @@ onMounted(() => {
   right: 30px;
 }
 
-/* Transition animations */
 .fade-transform-enter-active,
 .fade-transform-leave-active {
   transition: all 0.3s;

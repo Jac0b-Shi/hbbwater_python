@@ -1,10 +1,12 @@
 """Database connection and session management."""
+import asyncio
 import os
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Iterable
 
 from dotenv import load_dotenv
+from fastapi import HTTPException
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import declarative_base
@@ -88,6 +90,8 @@ def _parse_env_flag(names: Iterable[str]) -> bool | None:
     if value is None:
         return None
     normalized = value.strip().lower()
+    if not normalized:
+        return None
     if normalized in {"1", "true", "yes", "on"}:
         return True
     if normalized in {"0", "false", "no", "off"}:
@@ -212,8 +216,11 @@ def build_database_url() -> str:
     return render_database_url(build_database_settings_from_env(prefixes=("",)))
 
 
-def build_database_connect_args(dialect: str, *, dm_svc_path: str = "") -> dict[str, str]:
+def build_database_connect_args(dialect: str, *, dm_svc_path: str = "") -> dict[str, object]:
     """Build optional driver-specific SQLAlchemy connect args."""
+    if dialect == "sqlite":
+        return {"timeout": 30}
+
     if dialect != "dm":
         return {}
 
@@ -283,6 +290,8 @@ DATABASE_URL = render_database_url(_business_settings)
 DATABASE_DIALECT = get_database_backend_name(DATABASE_URL)
 _business_engine: AsyncEngine | None = None
 _business_session_factory: async_sessionmaker[AsyncSession] | None = None
+_business_runtime_error = ""
+_business_runtime_lock = asyncio.Lock()
 
 
 def get_current_business_settings() -> DatabaseSettings:
@@ -305,6 +314,7 @@ def get_business_runtime_state() -> dict[str, str | bool]:
         "database": _business_settings.database,
         "host": _business_settings.host,
         "service_name": _business_settings.service_name,
+        "last_error": _business_runtime_error,
     }
 
 
@@ -326,7 +336,7 @@ async def _prepare_business_engine(settings: DatabaseSettings) -> tuple[AsyncEng
 
 async def activate_business_database(settings: DatabaseSettings) -> dict[str, str]:
     """Validate and activate the business database runtime."""
-    global _business_engine, _business_session_factory, _business_settings, DATABASE_URL, DATABASE_DIALECT
+    global _business_engine, _business_session_factory, _business_settings, DATABASE_URL, DATABASE_DIALECT, _business_runtime_error
 
     new_engine, database_url, dialect = await _prepare_business_engine(settings)
     old_engine = _business_engine
@@ -341,6 +351,7 @@ async def activate_business_database(settings: DatabaseSettings) -> dict[str, st
     _business_settings = DatabaseSettings(**asdict(settings))
     DATABASE_URL = database_url
     DATABASE_DIALECT = dialect
+    _business_runtime_error = ""
 
     if old_engine is not None:
         await old_engine.dispose()
@@ -362,6 +373,23 @@ async def dispose_databases() -> None:
     await control_engine.dispose()
 
 
+async def ensure_business_database_ready() -> None:
+    """Lazily initialize the business runtime without crashing control-plane requests."""
+    global _business_runtime_error
+
+    if _business_session_factory is not None:
+        return
+
+    async with _business_runtime_lock:
+        if _business_session_factory is not None:
+            return
+        try:
+            await activate_business_database(_business_settings)
+        except Exception as exc:
+            _business_runtime_error = str(exc)
+            raise
+
+
 async def get_control_db():
     """Dependency to get control-plane database session."""
     async with ControlSessionLocal() as session:
@@ -377,8 +405,13 @@ async def get_control_db():
 
 async def get_business_db():
     """Dependency to get business-plane database session."""
-    if _business_session_factory is None:
-        await activate_business_database(_business_settings)
+    try:
+        await ensure_business_database_ready()
+    except Exception as exc:
+        detail = "业务数据库当前不可用，请先在系统设置中检查业务数据库配置"
+        if _business_runtime_error:
+            detail = f"{detail}: {_business_runtime_error}"
+        raise HTTPException(status_code=503, detail=detail) from exc
 
     async with _business_session_factory() as session:
         try:

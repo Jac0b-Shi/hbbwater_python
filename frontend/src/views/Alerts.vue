@@ -5,6 +5,7 @@
         <div class="page-header">
           <h2>告警管理</h2>
           <div class="header-actions">
+            <el-tag v-if="!accountStore.canResolveAlerts" effect="plain" type="info">当前账号仅可查看</el-tag>
             <el-radio-group v-model="filterStatus" size="small">
               <el-radio-button label="all">全部</el-radio-button>
               <el-radio-button label="active">未处理</el-radio-button>
@@ -87,14 +88,15 @@
         </el-table-column>
         <el-table-column label="操作" width="150" fixed="right">
           <template #default="{ row }">
-            <el-button 
-              v-if="!row.is_resolved" 
+            <el-button
+              v-if="!row.is_resolved && accountStore.canResolveAlerts"
               type="primary" 
               size="small" 
               @click="resolveAlert(row)"
             >
               处理
             </el-button>
+            <span v-else-if="!row.is_resolved" class="resolved-info">只读</span>
             <span v-else class="resolved-info">
               处理人: {{ row.resolved_by }}
             </span>
@@ -121,9 +123,11 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
+import { useAccountStore } from '../stores/account'
 import { useAlertStore } from '../stores/alerts'
 import dayjs from 'dayjs'
 
+const accountStore = useAccountStore()
 const alertStore = useAlertStore()
 
 const filterStatus = ref('active')
@@ -169,7 +173,7 @@ const refreshAlerts = () => {
 
 const resolveAlert = (alert) => {
   currentAlert.value = alert
-  resolveForm.value.resolved_by = ''
+  resolveForm.value.resolved_by = accountStore.displayName
   showResolveDialog.value = true
 }
 

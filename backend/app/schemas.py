@@ -14,6 +14,7 @@ class SensorBase(BaseModel):
     description: Optional[str] = None
     warning_level: Optional[Decimal] = None
     danger_level: Optional[Decimal] = None
+    threshold_condition: str = Field(default="greater_or_equal", pattern="^(greater_or_equal|less_or_equal)$")
     normal_interval: int = Field(default=1800, ge=60)
     alert_interval: int = Field(default=300, ge=60)
     is_active: bool = True
@@ -22,6 +23,11 @@ class SensorBase(BaseModel):
     webhook_group_id: Optional[int] = None
     webhook_group_token: Optional[str] = Field(None, max_length=64)
     device_imei: Optional[str] = Field(None, max_length=32)
+
+    @field_validator("threshold_condition", mode="before")
+    @classmethod
+    def default_threshold_condition(cls, value):
+        return value or "greater_or_equal"
 
 
 class SensorCreate(SensorBase):
@@ -34,6 +40,7 @@ class SensorUpdate(BaseModel):
     description: Optional[str] = None
     warning_level: Optional[Decimal] = None
     danger_level: Optional[Decimal] = None
+    threshold_condition: Optional[str] = Field(None, pattern="^(greater_or_equal|less_or_equal)$")
     normal_interval: Optional[int] = Field(None, ge=60)
     alert_interval: Optional[int] = Field(None, ge=60)
     is_active: Optional[bool] = None

@@ -137,6 +137,12 @@ async def _sync_legacy_webhook_groups(conn: AsyncConnection) -> None:
         )
     }
 
+    existing_group_ids = set(
+        (
+            await conn.execute(select(webhook_groups.c.id))
+        ).scalars().all()
+    )
+
     sensor_updates = [
         {"sensor_row_id": row.id, "group_id": token_to_group_id[row.webhook_group_token]}
         for row in (
@@ -149,6 +155,28 @@ async def _sync_legacy_webhook_groups(conn: AsyncConnection) -> None:
         )
         if row.webhook_group_token in token_to_group_id
     ]
+
+    orphan_group_rows = (
+        await conn.execute(
+            select(sensors.c.id, sensors.c.webhook_group_id, sensors.c.webhook_group_token).where(
+                sensors.c.webhook_group_id.is_not(None)
+            )
+        )
+    ).all()
+    for row in orphan_group_rows:
+        if row.webhook_group_id in existing_group_ids:
+            continue
+
+        repaired_group_id = None
+        if row.webhook_group_token and row.webhook_group_token in token_to_group_id:
+            repaired_group_id = token_to_group_id[row.webhook_group_token]
+
+        sensor_updates.append(
+            {
+                "sensor_row_id": row.id,
+                "group_id": repaired_group_id,
+            }
+        )
 
     if sensor_updates:
         await conn.execute(
@@ -189,6 +217,15 @@ async def ensure_runtime_schema(conn: AsyncConnection, dialect_name: str) -> Non
         await conn.execute(text(_build_add_column_sql(conn, "sensors", "webhook_group_id", Integer())))
     if not await _column_exists(conn, "sensors", "device_imei"):
         await conn.execute(text(_build_add_column_sql(conn, "sensors", "device_imei", String(32))))
+    if not await _column_exists(conn, "sensors", "threshold_condition"):
+        await conn.execute(text(_build_add_column_sql(conn, "sensors", "threshold_condition", String(32))))
+    await conn.execute(
+        text(
+            "UPDATE sensors "
+            "SET threshold_condition = 'greater_or_equal' "
+            "WHERE threshold_condition IS NULL OR threshold_condition = ''"
+        )
+    )
     if not await _index_exists(conn, "sensors", "idx_webhook_group_token"):
         try:
             await conn.execute(text("CREATE INDEX idx_webhook_group_token ON sensors (webhook_group_token)"))

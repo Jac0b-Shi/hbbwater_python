@@ -25,9 +25,10 @@
               {{ `${window.location.origin}/api/sensors/group-webhook/${sensor.webhook_group_token}` }}
             </el-descriptions-item>
             <el-descriptions-item label="状态">
-              <el-switch v-model="sensor.is_active" @change="updateActive" />
+              <el-switch v-model="sensor.is_active" :disabled="!accountStore.canManageSensors" @change="updateActive" />
             </el-descriptions-item>
             <template v-if="sensor.sensor_type === 'ultrasonic'">
+              <el-descriptions-item label="阈值判定">{{ formatThresholdCondition(sensor.threshold_condition) }}</el-descriptions-item>
               <el-descriptions-item label="预警水位">{{ sensor.warning_level }} cm</el-descriptions-item>
               <el-descriptions-item label="危险水位">{{ sensor.danger_level }} cm</el-descriptions-item>
             </template>
@@ -130,12 +131,14 @@ import { CanvasRenderer } from 'echarts/renderers'
 import { LineChart } from 'echarts/charts'
 import { GridComponent, TooltipComponent, LegendComponent, DataZoomComponent } from 'echarts/components'
 import VChart from 'vue-echarts'
+import { useAccountStore } from '../stores/account'
 import { useSensorStore } from '../stores/sensors'
 import dayjs from 'dayjs'
 
 use([CanvasRenderer, LineChart, GridComponent, TooltipComponent, LegendComponent, DataZoomComponent])
 
 const route = useRoute()
+const accountStore = useAccountStore()
 const sensorStore = useSensorStore()
 const sensorId = computed(() => route.params.id)
 let refreshTimer = null
@@ -219,6 +222,10 @@ const formatReportMethod = (sensorData) => {
   }
   return map[method] || method || '-'
 }
+
+const formatThresholdCondition = (value) => (
+  value === 'less_or_equal' ? '小于等于阈值触发' : '大于等于阈值触发'
+)
 
 const updateActive = async (val) => {
   try {
