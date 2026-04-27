@@ -68,6 +68,19 @@
             </div>
           </div>
           <div class="map-toolbar">
+            <div class="zoom-controls">
+              <el-button size="small" :disabled="mapZoom <= MIN_MAP_ZOOM" @click="changeZoom(-0.1)">缩小</el-button>
+              <el-slider
+                v-model="mapZoom"
+                :min="MIN_MAP_ZOOM"
+                :max="MAX_MAP_ZOOM"
+                :step="0.05"
+                :show-tooltip="false"
+                class="zoom-slider"
+              />
+              <span class="zoom-value">{{ zoomPercent }}%</span>
+              <el-button size="small" @click="resetZoom">适配</el-button>
+            </div>
             <el-select v-model="statusFilter" size="small" style="width: 160px">
               <el-option
                 v-for="option in statusFilterOptions"
@@ -103,150 +116,163 @@
       <el-empty v-if="!mergedMarkers.length" description="当前没有可展示的传感器" />
 
       <div v-else class="map-stage-shell">
-        <div ref="mapStageRef" class="map-stage" @click="closePanel">
-          <img class="map-image" src="/campus-water-map.webp" alt="校园水位地图" />
+        <div class="map-viewport">
+          <div class="map-canvas" :style="mapCanvasStyle">
+            <div ref="mapStageRef" class="map-stage" @click="closePanel">
+              <img class="map-image" src="/campus-water-map.webp" alt="校园水位地图" />
 
-          <div
-            v-for="marker in filteredMarkers"
-            :key="marker.sensor_id"
-            class="sensor-marker"
-            :class="getMarkerClasses(marker)"
-            :style="getMarkerStyle(marker)"
-          >
-            <button
-              class="sensor-dot"
-              type="button"
-              @click.stop="toggleMarkerPanel(marker)"
-            >
-              <span class="sensor-dot-core" />
-            </button>
-
-            <button
-              v-if="accountStore.canManageSensors && !marker.map_locked"
-              class="drag-handle"
-              type="button"
-              @pointerdown.prevent.stop="startDrag($event, marker)"
-              :title="`拖动 ${marker.sensor_id}`"
-            >
-              <span class="drag-text">拖</span>
-            </button>
-
-            <button
-              class="sensor-label"
-              type="button"
-              @click.stop="toggleMarkerPanel(marker)"
-            >
-              <span class="sensor-id">{{ marker.sensor_id }}</span>
-              <span class="sensor-reading">{{ getMarkerReadingText(marker) }}</span>
-              <span v-if="marker.sensor_type === 'ultrasonic' && marker.metric.mode === 'distance'" class="sensor-hint">
-                待设基准
-              </span>
-              <span v-else-if="!marker.hasStoredPosition" class="sensor-hint">
-                临时位置
-              </span>
-            </button>
-
-            <div
-              v-if="selectedSensorId === marker.sensor_id"
-              class="sensor-panel"
-              :class="getPanelClasses(marker)"
-              @click.stop
-            >
-              <div class="sensor-panel-header">
-                <div>
-                  <div class="panel-title-row">
-                    <span class="panel-title">{{ marker.sensor_id }}</span>
-                    <el-tag size="small" :type="getStatusTagType(marker.status)">
-                      {{ getStatusText(marker.status) }}
-                    </el-tag>
-                  </div>
-                  <div class="panel-subtitle">{{ marker.location }}</div>
-                </div>
-                <button class="panel-close" type="button" @click="closePanel">
-                  x
+              <div
+                v-for="marker in filteredMarkers"
+                :key="marker.sensor_id"
+                class="sensor-marker"
+                :class="getMarkerClasses(marker)"
+                :style="getMarkerStyle(marker)"
+              >
+                <button
+                  class="sensor-dot"
+                  type="button"
+                  @click.stop="toggleMarkerPanel(marker)"
+                >
+                  <span class="sensor-dot-core" />
                 </button>
-              </div>
 
-              <div class="sensor-panel-grid">
-                <div class="metric-item">
-                  <span class="metric-label">传感器类型</span>
-                  <span class="metric-value">{{ getSensorTypeLabel(marker.sensor_type) }}</span>
-                </div>
-                <div class="metric-item">
-                  <span class="metric-label">最近上报</span>
-                  <span class="metric-value">{{ formatLastReading(marker.last_reading) }}</span>
-                </div>
-                <div v-if="marker.sensor_type === 'ultrasonic'" class="metric-item">
-                  <span class="metric-label">当前测距</span>
-                  <span class="metric-value">{{ formatMetricValue(marker.water_level) }} cm</span>
-                </div>
-                <div v-if="marker.sensor_type === 'ultrasonic'" class="metric-item">
-                  <span class="metric-label">相对水位</span>
-                  <span class="metric-value">
-                    {{ marker.relativeWaterLevel !== null ? `${formatMetricValue(marker.relativeWaterLevel)} cm` : '待设基准' }}
+                <button
+                  v-if="accountStore.canManageSensors && !isMarkerLocked(marker)"
+                  class="drag-handle"
+                  type="button"
+                  @pointerdown.prevent.stop="startDrag($event, marker)"
+                  :title="`拖动 ${marker.sensor_id}`"
+                >
+                  <span class="drag-text">拖</span>
+                </button>
+
+                <button
+                  class="sensor-label"
+                  type="button"
+                  @click.stop="toggleMarkerPanel(marker)"
+                >
+                  <span class="sensor-id">{{ marker.sensor_id }}</span>
+                  <span class="sensor-reading">{{ getMarkerReadingText(marker) }}</span>
+                  <span v-if="marker.sensor_type === 'ultrasonic' && marker.metric.mode === 'distance'" class="sensor-hint">
+                    待设基准
                   </span>
-                </div>
-                <div v-if="marker.sensor_type === 'immersion'" class="metric-item">
-                  <span class="metric-label">浸水状态</span>
-                  <span class="metric-value">{{ marker.water_detected ? '检测到浸水' : '未检测到浸水' }}</span>
-                </div>
-                <div class="metric-item">
-                  <span class="metric-label">位置状态</span>
-                  <span class="metric-value">
-                    {{ marker.hasStoredPosition ? '已保存' : '临时坐标' }} / {{ marker.map_locked ? '已锁定' : '未锁定' }}
+                  <span v-else-if="!marker.hasStoredPosition" class="sensor-hint">
+                    临时位置
                   </span>
-                </div>
-              </div>
+                </button>
 
-              <template v-if="accountStore.canManageSensors">
-                <div v-if="marker.sensor_type === 'ultrasonic'" class="config-section">
-                  <div class="config-title">基准值设置</div>
-                  <div class="config-help">
-                    相对水位 = 基准测距 - 当前测距。用于把不同安装高度的测距值换算成可比较的平均水位。
-                  </div>
-                  <div class="config-row">
-                    <el-input-number
-                      v-model="panelForm.water_level_baseline"
-                      :min="0"
-                      :step="0.5"
-                      :precision="1"
-                      controls-position="right"
-                      style="width: 170px"
-                    />
-                    <el-button text @click="panelForm.water_level_baseline = null">清除基准</el-button>
-                  </div>
-                </div>
-
-                <div class="config-section">
-                  <div class="config-title">点位布局</div>
-                  <div class="config-row config-row-between">
-                    <div class="lock-hint">
-                      {{ marker.map_locked ? '已锁定，拖动手柄会隐藏。' : '未锁定，可继续拖动点位微调。' }}
+                <div
+                  v-if="selectedSensorId === marker.sensor_id"
+                  class="sensor-panel"
+                  :class="getPanelClasses(marker)"
+                  @click.stop
+                >
+                  <div class="sensor-panel-header">
+                    <div>
+                      <div class="panel-title-row">
+                        <span class="panel-title">{{ marker.sensor_id }}</span>
+                        <el-tag size="small" :type="getStatusTagType(marker.status)">
+                          {{ getStatusText(marker.status) }}
+                        </el-tag>
+                      </div>
+                      <div class="panel-subtitle">{{ marker.location }}</div>
                     </div>
-                    <el-switch v-model="panelForm.map_locked" />
+                    <button class="panel-close" type="button" @click="closePanel">
+                      x
+                    </button>
                   </div>
-                  <div class="config-help">
-                    当前坐标：X {{ marker.x.toFixed(2) }}%，Y {{ marker.y.toFixed(2) }}%
-                  </div>
-                </div>
 
-                <div class="panel-actions">
-                  <el-button
-                    v-if="!panelForm.map_locked"
-                    @click="lockCurrentMarker"
-                    :loading="savingSensorId === marker.sensor_id"
-                  >
-                    锁定当前位置
-                  </el-button>
-                  <el-button
-                    type="primary"
-                    @click="saveSelectedConfig"
-                    :loading="savingSensorId === marker.sensor_id"
-                  >
-                    保存配置
-                  </el-button>
+                  <div class="sensor-panel-grid">
+                    <div class="metric-item">
+                      <span class="metric-label">传感器类型</span>
+                      <span class="metric-value">{{ getSensorTypeLabel(marker.sensor_type) }}</span>
+                    </div>
+                    <div class="metric-item">
+                      <span class="metric-label">最近上报</span>
+                      <span class="metric-value">{{ formatLastReading(marker.last_reading) }}</span>
+                    </div>
+                    <div v-if="marker.sensor_type === 'ultrasonic'" class="metric-item">
+                      <span class="metric-label">当前测距</span>
+                      <span class="metric-value">{{ formatMetricValue(marker.water_level) }} cm</span>
+                    </div>
+                    <div v-if="marker.sensor_type === 'ultrasonic'" class="metric-item">
+                      <span class="metric-label">相对水位</span>
+                      <span class="metric-value">
+                        {{ marker.relativeWaterLevel !== null ? `${formatMetricValue(marker.relativeWaterLevel)} cm` : '待设基准' }}
+                      </span>
+                    </div>
+                    <div v-if="marker.sensor_type === 'immersion'" class="metric-item">
+                      <span class="metric-label">浸水状态</span>
+                      <span class="metric-value">{{ marker.water_detected ? '检测到浸水' : '未检测到浸水' }}</span>
+                    </div>
+                    <div class="metric-item">
+                      <span class="metric-label">位置状态</span>
+                      <span class="metric-value">
+                        {{ marker.hasStoredPosition ? '已保存' : '临时坐标' }} / {{ isMarkerLocked(marker) ? '已锁定' : '未锁定' }}
+                      </span>
+                    </div>
+                  </div>
+
+                  <template v-if="accountStore.canManageSensors">
+                    <div v-if="marker.sensor_type === 'ultrasonic'" class="config-section">
+                      <div class="config-title">基准值设置</div>
+                      <div class="config-help">
+                        相对水位 = 基准测距 - 当前测距。用于把不同安装高度的测距值换算成可比较的平均水位。
+                      </div>
+                      <div class="config-row">
+                        <el-input-number
+                          v-model="panelForm.water_level_baseline"
+                          :min="0"
+                          :step="0.5"
+                          :precision="1"
+                          controls-position="right"
+                          style="width: 170px"
+                        />
+                        <el-button text @click="panelForm.water_level_baseline = null">清除基准</el-button>
+                      </div>
+                    </div>
+
+                    <div class="config-section">
+                      <div class="config-title">点位布局</div>
+                      <div class="config-row config-row-between">
+                        <div class="lock-hint">
+                          {{ isMarkerLocked(marker) ? '已锁定，拖动手柄会隐藏。' : '未锁定，可继续拖动点位微调。' }}
+                        </div>
+                        <el-switch v-model="panelForm.map_locked" />
+                      </div>
+                      <div class="config-help">
+                        当前坐标：X {{ marker.x.toFixed(2) }}%，Y {{ marker.y.toFixed(2) }}%
+                      </div>
+                    </div>
+
+                    <div class="panel-actions">
+                      <el-button
+                        v-if="marker.hasStoredPosition"
+                        text
+                        type="danger"
+                        @click="resetSelectedPosition"
+                        :loading="savingSensorId === marker.sensor_id"
+                      >
+                        重置点位
+                      </el-button>
+                      <el-button
+                        v-if="!panelForm.map_locked"
+                        @click="lockCurrentMarker"
+                        :loading="savingSensorId === marker.sensor_id"
+                      >
+                        锁定当前位置
+                      </el-button>
+                      <el-button
+                        type="primary"
+                        @click="saveSelectedConfig"
+                        :loading="savingSensorId === marker.sensor_id"
+                      >
+                        保存配置
+                      </el-button>
+                    </div>
+                  </template>
                 </div>
-              </template>
+              </div>
             </div>
           </div>
         </div>
@@ -268,8 +294,8 @@
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { useAccountStore } from '../stores/account'
 import { useSensorStore } from '../stores/sensors'
 import { SHORT_DATE_TIME_FORMAT, formatUtc8DateTime } from '../utils/time'
@@ -283,6 +309,9 @@ import {
 
 const accountStore = useAccountStore()
 const sensorStore = useSensorStore()
+const MAP_ZOOM_STORAGE_KEY = 'hbbwater_water_map_zoom'
+const MIN_MAP_ZOOM = 0.55
+const MAX_MAP_ZOOM = 1.35
 
 const statusRows = ref([])
 const statusFilter = ref('all')
@@ -293,6 +322,7 @@ const savingSensorId = ref('')
 const pendingPositions = ref({})
 const dragState = ref(null)
 const mapStageRef = ref(null)
+const mapZoom = ref(1)
 const panelForm = reactive({
   water_level_baseline: null,
   map_locked: false,
@@ -307,6 +337,19 @@ const statusFilterOptions = [
   { value: 'offline', label: '离线/停用' },
   { value: 'needs-baseline', label: '未设基准' },
 ]
+
+function normalizeZoom(value) {
+  const next = Number(value)
+  if (!Number.isFinite(next)) {
+    return 1
+  }
+
+  return Math.min(MAX_MAP_ZOOM, Math.max(MIN_MAP_ZOOM, Number(next.toFixed(2))))
+}
+
+if (typeof window !== 'undefined') {
+  mapZoom.value = normalizeZoom(localStorage.getItem(MAP_ZOOM_STORAGE_KEY) || 1)
+}
 
 function getFallbackPosition(index) {
   const columns = 3
@@ -400,12 +443,30 @@ const relativeWaterSamples = computed(() => activeSensors.value
   .map((marker) => marker.relativeWaterLevel))
 
 const averageSampleCount = computed(() => relativeWaterSamples.value.length)
+const zoomPercent = computed(() => Math.round(mapZoom.value * 100))
+const markerScale = computed(() => Number(Math.max(0.82, Math.min(1.08, mapZoom.value)).toFixed(2)))
+const mapCanvasStyle = computed(() => ({
+  width: `${Math.round(mapZoom.value * 100)}%`,
+  '--marker-scale': markerScale.value,
+}))
 const averageRelativeWaterLevel = computed(() => {
   if (!relativeWaterSamples.value.length) {
     return null
   }
   const total = relativeWaterSamples.value.reduce((sum, value) => sum + value, 0)
   return total / relativeWaterSamples.value.length
+})
+
+watch(mapZoom, (value) => {
+  const normalized = normalizeZoom(value)
+  if (normalized !== value) {
+    mapZoom.value = normalized
+    return
+  }
+
+  if (typeof window !== 'undefined') {
+    localStorage.setItem(MAP_ZOOM_STORAGE_KEY, String(normalized))
+  }
 })
 
 function syncPanelForm(marker) {
@@ -504,6 +565,26 @@ function getMarkerStyle(marker) {
   }
 }
 
+function isMarkerLocked(marker) {
+  if (selectedSensorId.value === marker.sensor_id) {
+    return Boolean(panelForm.map_locked)
+  }
+
+  return Boolean(marker.map_locked)
+}
+
+function setMapZoom(value) {
+  mapZoom.value = normalizeZoom(value)
+}
+
+function changeZoom(delta) {
+  setMapZoom(mapZoom.value + delta)
+}
+
+function resetZoom() {
+  setMapZoom(1)
+}
+
 async function refreshStatuses({ quiet = false } = {}) {
   statusLoading.value = true
   try {
@@ -552,7 +633,7 @@ function clearPendingPosition(sensorId) {
 }
 
 function startDrag(event, marker) {
-  if (!accountStore.canManageSensors || marker.map_locked || !mapStageRef.value) {
+  if (!accountStore.canManageSensors || isMarkerLocked(marker) || !mapStageRef.value) {
     return
   }
 
@@ -645,6 +726,44 @@ async function saveSelectedConfig() {
 async function lockCurrentMarker() {
   panelForm.map_locked = true
   await saveSelectedConfig()
+}
+
+async function resetSelectedPosition() {
+  if (!accountStore.canManageSensors || !selectedMarker.value) {
+    return
+  }
+
+  const marker = selectedMarker.value
+
+  try {
+    await ElMessageBox.confirm(
+      `确定重置 ${marker.sensor_id} 的地图点位吗？重置后会回到临时坐标，需要重新拖动并保存。`,
+      '重置点位',
+      { type: 'warning' },
+    )
+  } catch (error) {
+    if (error === 'cancel' || error === 'close') {
+      return
+    }
+    throw error
+  }
+
+  savingSensorId.value = marker.sensor_id
+  try {
+    await sensorStore.updateSensor(marker.sensor_id, {
+      map_x: null,
+      map_y: null,
+      map_locked: false,
+    })
+    clearPendingPosition(marker.sensor_id)
+    panelForm.map_locked = false
+    syncPanelForm(selectedMarker.value)
+    ElMessage.success('点位已重置，请重新拖动布置')
+  } catch (error) {
+    ElMessage.error(error.response?.data?.detail || '重置点位失败')
+  } finally {
+    savingSensorId.value = ''
+  }
 }
 
 onMounted(async () => {
@@ -778,6 +897,30 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.zoom-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.84);
+  border: 1px solid #dbe5f0;
+  backdrop-filter: blur(10px);
+}
+
+.zoom-slider {
+  width: 130px;
+}
+
+.zoom-value {
+  min-width: 48px;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .map-notices {
@@ -794,6 +937,18 @@ onUnmounted(() => {
     radial-gradient(circle at top left, rgba(56, 189, 248, 0.12), transparent 28%),
     linear-gradient(180deg, #e2ecf8 0%, #eff5fb 100%);
   padding: 16px;
+}
+
+.map-viewport {
+  overflow: auto;
+  padding: 4px 2px 22px;
+}
+
+.map-canvas {
+  width: 100%;
+  min-width: 55%;
+  margin: 0 auto;
+  --marker-scale: 1;
 }
 
 .map-stage {
@@ -826,12 +981,12 @@ onUnmounted(() => {
 
 .sensor-dot {
   position: relative;
-  width: 22px;
-  height: 22px;
+  width: calc(22px * var(--marker-scale));
+  height: calc(22px * var(--marker-scale));
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.88);
   box-shadow:
-    0 0 0 6px rgba(59, 130, 246, 0.18),
+    0 0 0 calc(6px * var(--marker-scale)) rgba(59, 130, 246, 0.18),
     0 8px 24px rgba(15, 23, 42, 0.24);
 }
 
@@ -847,51 +1002,51 @@ onUnmounted(() => {
 }
 
 .sensor-dot::before {
-  width: 28px;
-  height: 28px;
+  width: calc(28px * var(--marker-scale));
+  height: calc(28px * var(--marker-scale));
 }
 
 .sensor-dot::after {
-  width: 38px;
-  height: 38px;
+  width: calc(38px * var(--marker-scale));
+  height: calc(38px * var(--marker-scale));
 }
 
 .sensor-dot-core {
   display: block;
-  width: 12px;
-  height: 12px;
-  margin: 5px;
+  width: calc(12px * var(--marker-scale));
+  height: calc(12px * var(--marker-scale));
+  margin: calc(5px * var(--marker-scale));
   border-radius: 999px;
   background: currentColor;
 }
 
 .drag-handle {
   position: absolute;
-  left: -36px;
-  top: -4px;
-  width: 26px;
-  height: 26px;
-  border-radius: 10px;
+  left: calc(-36px * var(--marker-scale));
+  top: calc(-4px * var(--marker-scale));
+  width: calc(26px * var(--marker-scale));
+  height: calc(26px * var(--marker-scale));
+  border-radius: calc(10px * var(--marker-scale));
   background: rgba(15, 23, 42, 0.78);
   color: #fff;
   touch-action: none;
 }
 
 .drag-text {
-  font-size: 9px;
+  font-size: calc(9px * var(--marker-scale));
   font-weight: 700;
   letter-spacing: 0.03em;
 }
 
 .sensor-label {
   position: absolute;
-  left: 18px;
+  left: calc(18px * var(--marker-scale));
   top: 50%;
   transform: translateY(-50%);
-  min-width: 118px;
-  max-width: 170px;
-  padding: 9px 12px;
-  border-radius: 14px;
+  min-width: calc(112px * var(--marker-scale));
+  max-width: calc(164px * var(--marker-scale));
+  padding: calc(9px * var(--marker-scale)) calc(12px * var(--marker-scale));
+  border-radius: calc(14px * var(--marker-scale));
   background: rgba(255, 255, 255, 0.96);
   box-shadow: 0 16px 28px rgba(15, 23, 42, 0.18);
   color: #0f172a;
@@ -900,38 +1055,38 @@ onUnmounted(() => {
 
 .align-right .sensor-label {
   left: auto;
-  right: 18px;
+  right: calc(18px * var(--marker-scale));
 }
 
 .sensor-id {
   display: block;
-  font-size: 12px;
+  font-size: calc(12px * var(--marker-scale));
   font-weight: 700;
   letter-spacing: 0.02em;
 }
 
 .sensor-reading {
   display: block;
-  margin-top: 4px;
+  margin-top: calc(4px * var(--marker-scale));
   color: #2563eb;
-  font-size: 13px;
+  font-size: calc(13px * var(--marker-scale));
   font-weight: 600;
 }
 
 .sensor-hint {
   display: inline-flex;
-  margin-top: 6px;
-  padding: 2px 8px;
+  margin-top: calc(6px * var(--marker-scale));
+  padding: calc(2px * var(--marker-scale)) calc(8px * var(--marker-scale));
   border-radius: 999px;
   background: #eff6ff;
   color: #475569;
-  font-size: 11px;
+  font-size: calc(11px * var(--marker-scale));
 }
 
 .sensor-panel {
   position: absolute;
-  left: 18px;
-  top: 28px;
+  left: calc(18px * var(--marker-scale));
+  top: calc(28px * var(--marker-scale));
   width: 310px;
   padding: 16px;
   border-radius: 18px;
@@ -941,12 +1096,12 @@ onUnmounted(() => {
 
 .panel-right {
   left: auto;
-  right: 18px;
+  right: calc(18px * var(--marker-scale));
 }
 
 .panel-up {
   top: auto;
-  bottom: 28px;
+  bottom: calc(28px * var(--marker-scale));
 }
 
 .sensor-panel-header {
@@ -1141,7 +1296,7 @@ onUnmounted(() => {
   }
 
   .map-toolbar {
-    justify-content: flex-end;
+    justify-content: space-between;
   }
 
   .sensor-panel {
@@ -1164,6 +1319,20 @@ onUnmounted(() => {
 
   .map-stage-shell {
     padding: 10px;
+  }
+
+  .map-viewport {
+    padding-bottom: 16px;
+  }
+
+  .zoom-controls {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .zoom-slider {
+    flex: 1;
+    min-width: 88px;
   }
 
   .sensor-label {
