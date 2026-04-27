@@ -1,7 +1,7 @@
 """Lightweight schema alignment for deployments without migrations."""
 from datetime import datetime
 
-from sqlalchemy import Integer, String, bindparam, inspect, select, table, column, text, update
+from sqlalchemy import DECIMAL, Integer, String, bindparam, inspect, select, table, column, text, update
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -221,6 +221,14 @@ async def ensure_runtime_schema(conn: AsyncConnection, dialect_name: str) -> Non
         await conn.execute(text(_build_add_column_sql(conn, "sensors", "threshold_condition", String(32))))
     if not await _column_exists(conn, "sensors", "measurement_unit"):
         await conn.execute(text(_build_add_column_sql(conn, "sensors", "measurement_unit", String(8))))
+    if not await _column_exists(conn, "sensors", "water_level_baseline"):
+        await conn.execute(text(_build_add_column_sql(conn, "sensors", "water_level_baseline", DECIMAL(10, 2))))
+    if not await _column_exists(conn, "sensors", "map_x"):
+        await conn.execute(text(_build_add_column_sql(conn, "sensors", "map_x", DECIMAL(6, 3))))
+    if not await _column_exists(conn, "sensors", "map_y"):
+        await conn.execute(text(_build_add_column_sql(conn, "sensors", "map_y", DECIMAL(6, 3))))
+    if not await _column_exists(conn, "sensors", "map_locked"):
+        await conn.execute(text(_build_add_column_sql(conn, "sensors", "map_locked", Integer())))
     await conn.execute(
         text(
             "UPDATE sensors "
@@ -233,6 +241,13 @@ async def ensure_runtime_schema(conn: AsyncConnection, dialect_name: str) -> Non
             "UPDATE sensors "
             "SET measurement_unit = 'cm' "
             "WHERE measurement_unit IS NULL OR measurement_unit = ''"
+        )
+    )
+    await conn.execute(
+        text(
+            "UPDATE sensors "
+            "SET map_locked = 0 "
+            "WHERE map_locked IS NULL"
         )
     )
     if not await _index_exists(conn, "sensors", "idx_webhook_group_token"):

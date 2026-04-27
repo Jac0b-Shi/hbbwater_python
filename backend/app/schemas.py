@@ -33,6 +33,10 @@ class SensorBase(BaseModel):
     danger_level: Optional[Decimal] = None
     threshold_condition: str = Field(default="greater_or_equal", pattern="^(greater_or_equal|less_or_equal)$")
     measurement_unit: str = Field(default="cm", pattern="^(cm|mm)$")
+    water_level_baseline: Optional[Decimal] = Field(None, ge=0)
+    map_x: Optional[Decimal] = Field(None, ge=0, le=100)
+    map_y: Optional[Decimal] = Field(None, ge=0, le=100)
+    map_locked: bool = False
     normal_interval: int = Field(default=1800, ge=60)
     alert_interval: int = Field(default=300, ge=60)
     is_active: bool = True
@@ -65,6 +69,10 @@ class SensorUpdate(BaseModel):
     danger_level: Optional[Decimal] = None
     threshold_condition: Optional[str] = Field(None, pattern="^(greater_or_equal|less_or_equal)$")
     measurement_unit: Optional[str] = Field(None, pattern="^(cm|mm)$")
+    water_level_baseline: Optional[Decimal] = Field(None, ge=0)
+    map_x: Optional[Decimal] = Field(None, ge=0, le=100)
+    map_y: Optional[Decimal] = Field(None, ge=0, le=100)
+    map_locked: Optional[bool] = None
     normal_interval: Optional[int] = Field(None, ge=60)
     alert_interval: Optional[int] = Field(None, ge=60)
     is_active: Optional[bool] = None

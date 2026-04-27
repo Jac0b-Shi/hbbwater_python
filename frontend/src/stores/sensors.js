@@ -3,7 +3,15 @@ import { defineStore } from 'pinia'
 import axios from 'axios'
 import { parseUtcDate } from '../utils/time'
 
-const numericFields = ['water_level', 'battery_level', 'warning_level', 'danger_level']
+const numericFields = [
+  'water_level',
+  'battery_level',
+  'warning_level',
+  'danger_level',
+  'water_level_baseline',
+  'map_x',
+  'map_y',
+]
 
 function toNumber(value) {
   if (value === null || value === undefined || value === '') return null
@@ -232,7 +240,7 @@ export const useSensorStore = defineStore('sensors', () => {
   async function fetchAllSensorStatus() {
     try {
       const response = await axios.get('/api/sensors/status/all')
-      return response.data
+      return response.data.map(normalizeNumericFields)
     } catch (err) {
       console.error('Failed to fetch sensor status:', err)
       throw err

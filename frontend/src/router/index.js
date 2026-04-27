@@ -24,6 +24,12 @@ const routes = [
     meta: { title: '监控仪表盘', requiresAuth: true }
   },
   {
+    path: '/water-map',
+    name: 'WaterMap',
+    component: () => import('../views/WaterMap.vue'),
+    meta: { title: '水位地图', requiresAuth: true }
+  },
+  {
     path: '/sensors',
     name: 'Sensors',
     component: () => import('../views/Sensors.vue'),

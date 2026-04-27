@@ -20,6 +20,11 @@
             <template #title>监控仪表盘</template>
           </el-menu-item>
 
+          <el-menu-item index="/water-map">
+            <el-icon><LocationFilled /></el-icon>
+            <template #title>水位地图</template>
+          </el-menu-item>
+
           <el-sub-menu index="/sensors">
             <template #title>
               <el-icon><Cpu /></el-icon>
