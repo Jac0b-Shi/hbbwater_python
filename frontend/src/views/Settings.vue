@@ -308,7 +308,7 @@
             <span>系统信息</span>
           </template>
           <el-descriptions :column="3" border>
-            <el-descriptions-item label="系统版本">v1.0.0</el-descriptions-item>
+            <el-descriptions-item label="系统版本">{{ APP_VERSION }}</el-descriptions-item>
             <el-descriptions-item label="API版本">v1</el-descriptions-item>
             <el-descriptions-item label="控制库">SQLite</el-descriptions-item>
             <el-descriptions-item label="当前业务库">{{ businessDbState.runtime.display_name || '-' }}</el-descriptions-item>
@@ -328,6 +328,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import axios from 'axios'
+import { APP_VERSION } from '../constants/appMeta'
 import { formatUtc8DateTime } from '../utils/time'
 
 const systemConfig = ref({

@@ -61,7 +61,7 @@
 
         <div class="sidebar-footer">
           <el-tag size="small" type="info">{{ accountStore.roleLabel }}</el-tag>
-          <el-text type="info" size="small">v1.0.0</el-text>
+          <el-text type="info" size="small">{{ APP_VERSION }}</el-text>
         </div>
       </el-aside>
 
@@ -118,6 +118,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useAlertStore } from './stores/alerts'
 import { useAccountStore } from './stores/account'
 import Breadcrumb from './components/Breadcrumb.vue'
+import { APP_VERSION } from './constants/appMeta'
 
 const route = useRoute()
 const router = useRouter()
