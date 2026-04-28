@@ -52,7 +52,7 @@
 
       <!-- Chart -->
       <div v-if="historyData.length" class="chart-section">
-        <v-chart class="history-chart" :option="chartOption" autoresize />
+        <v-chart class="history-chart" :option="chartOption" autoresize @datazoom="handleDataZoom" />
       </div>
 
       <!-- Data Table -->
@@ -130,6 +130,8 @@ const historyData = ref([])
 const loading = ref(false)
 const currentPage = ref(1)
 const pageSize = ref(100)
+const chartZoomRange = ref(null)
+const activeQueryKey = ref('')
 let refreshTimer = null
 
 const ultrasonicSensors = computed(() => sensorStore.ultrasonicSensors)
@@ -139,6 +141,11 @@ const paginatedData = computed(() => {
   const start = (currentPage.value - 1) * pageSize.value
   return historyData.value.slice(start, start + pageSize.value)
 })
+
+const getCurrentQueryKey = () => {
+  const timeRange = filterForm.value.timeRange || []
+  return [filterForm.value.sensor_id, timeRange[0] || '', timeRange[1] || ''].join('|')
+}
 
 const chartOption = computed(() => {
   if (!historyData.value.length) return {}
@@ -162,7 +169,10 @@ const chartOption = computed(() => {
       min: isUltrasonic ? 0 : -0.1,
       max: isUltrasonic ? null : 1.1
     },
-    dataZoom: [{ type: 'inside' }, { type: 'slider' }],
+    dataZoom: [
+      { id: 'history-inside-zoom', type: 'inside', ...(chartZoomRange.value || {}) },
+      { id: 'history-slider-zoom', type: 'slider', ...(chartZoomRange.value || {}) }
+    ],
     series: [{
       name: isUltrasonic ? '水位' : '浸水',
       type: isUltrasonic ? 'line' : 'scatter',
@@ -186,7 +196,19 @@ const getStatusText = (status) => {
   return map[status] || status
 }
 
-const queryHistory = async () => {
+const handleDataZoom = (params) => {
+  const zoom = params?.batch?.[0] || params
+  if (!Number.isFinite(zoom?.start) || !Number.isFinite(zoom?.end)) {
+    return
+  }
+
+  chartZoomRange.value = {
+    start: zoom.start,
+    end: zoom.end
+  }
+}
+
+const queryHistory = async ({ resetPage = true } = {}) => {
   if (!filterForm.value.sensor_id) {
     ElMessage.warning('请选择传感器')
     return
@@ -194,6 +216,8 @@ const queryHistory = async () => {
   
   loading.value = true
   try {
+    const queryKey = getCurrentQueryKey()
+    const queryChanged = queryKey !== activeQueryKey.value
     const params = { limit: 10000 }
     if (filterForm.value.timeRange?.length === 2) {
       params.start_time = formatUtc8AsBackendUtc(filterForm.value.timeRange[0])
@@ -205,7 +229,13 @@ const queryHistory = async () => {
       ...item,
       location: sensorStore.sensors.find(s => s.sensor_id === item.sensor_id)?.location || ''
     }))
-    currentPage.value = 1
+    activeQueryKey.value = queryKey
+    if (queryChanged) {
+      chartZoomRange.value = null
+    }
+    if (resetPage || queryChanged) {
+      currentPage.value = 1
+    }
   } catch (error) {
     ElMessage.error('查询失败')
   } finally {
@@ -216,6 +246,9 @@ const queryHistory = async () => {
 const resetFilter = () => {
   filterForm.value = { sensor_id: '', timeRange: [] }
   historyData.value = []
+  chartZoomRange.value = null
+  activeQueryKey.value = ''
+  currentPage.value = 1
 }
 
 const exportData = () => {
@@ -247,7 +280,7 @@ onMounted(() => {
   refreshTimer = setInterval(() => {
     sensorStore.fetchSensors()
     if (filterForm.value.sensor_id) {
-      queryHistory()
+      queryHistory({ resetPage: false })
     }
   }, 10000)
 })

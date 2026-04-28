@@ -58,6 +58,7 @@ tools/webhook_proxy.py
 # OS files
 .DS_Store
 Thumbs.db
+*syncthing*
 
 # SSH files
 .ssh/
