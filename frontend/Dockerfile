@@ -1,34 +1,16 @@
-# 校园水浸监测系统 - Vue 前端 Dockerfile
-# 多阶段构建
+FROM python:3.12-slim
 
-# 阶段 1: 构建阶段
-FROM node:20-alpine AS builder
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-# 复制 package.json 和 package-lock.json
-COPY package*.json ./
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-# 用锁文件安装完整依赖，避免构建阶段遗漏 vite 等 devDependencies
-RUN npm ci --include=dev --no-audit --no-fund
+COPY app.py .
+COPY assets ./assets
 
-# 复制源代码
-COPY . .
+EXPOSE 8501
 
-# 构建生产版本
-RUN npm run build
-
-# 阶段 2: 生产阶段（使用 Caddy 托管静态文件）
-FROM caddy:2-alpine
-
-# 复制构建好的文件到 Caddy 的站点目录
-COPY --from=builder /app/dist /srv
-
-# 复制 Caddyfile
-COPY Caddyfile /etc/caddy/Caddyfile
-
-# 暴露端口
-EXPOSE 80
-
-# Caddy 默认命令
-CMD ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
+CMD ["python", "-m", "streamlit", "run", "app.py", "--server.address=0.0.0.0", "--server.port=8501", "--browser.gatherUsageStats=false"]

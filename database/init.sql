@@ -1,3 +1,0 @@
--- 兼容入口：MySQL 初始化脚本已迁移到 database/mysql/init.sql
--- 如果你是手工执行，请改用：
---   source /mnt/e/CodeProjects/hbbwater/database/mysql/init.sql

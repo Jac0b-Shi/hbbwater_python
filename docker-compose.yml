@@ -1,156 +1,97 @@
-# 校园水浸监测系统 - Docker Compose 配置
-# 一键部署所有服务
-
 services:
-  # MySQL 数据库（仅 Docker 内网访问，不向宿主机发布 3306）
-  mysql:
-    image: mysql:8.0
-    container_name: flood-monitoring-mysql
+  postgres:
+    image: postgres:16-alpine
+    container_name: hbbwater-python-postgres
     restart: unless-stopped
-    command: --event-scheduler=ON
     environment:
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root_password_2025}
-      MYSQL_DATABASE: ${DB_NAME:-flood_monitoring}
-      MYSQL_USER: ${DB_USER:-flood_user}
-      MYSQL_PASSWORD: ${DB_PASSWORD:-flood_monitoring_2025}
+      POSTGRES_DB: ${POSTGRES_DB:-hbbwater}
+      POSTGRES_USER: ${POSTGRES_USER:-hbbwater}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-hbbwater}
     volumes:
-      - mysql_data:/var/lib/mysql
-      - ./database/mysql/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
-      - ./database/mysql/procedures.sql:/docker-entrypoint-initdb.d/02-procedures.sql:ro
-    expose:
-      - "3306"
-    networks:
-      - flood-network
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-root_password_2025}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-hbbwater} -d ${POSTGRES_DB:-hbbwater}"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 30s
+    networks:
+      - hbbwater
 
-  # FastAPI 后端服务
+  emqx:
+    image: emqx/emqx:5.7.2
+    container_name: hbbwater-python-emqx
+    restart: unless-stopped
+    ports:
+      - "${MQTT_PORT:-1883}:1883"
+      - "${EMQX_DASHBOARD_PORT:-18083}:18083"
+    volumes:
+      - emqx_data:/opt/emqx/data
+      - emqx_log:/opt/emqx/log
+    networks:
+      - hbbwater
+
   backend:
     build:
       context: ./backend
-      dockerfile: Dockerfile
-    container_name: flood-monitoring-backend
+    container_name: hbbwater-python-backend
     restart: unless-stopped
     environment:
-      CONTROL_DATABASE_URL: ${BACKEND_CONTROL_DATABASE_URL:-sqlite+aiosqlite:////app/runtime/control.db}
-      BUSINESS_DATABASE_URL: ${BACKEND_DATABASE_URL:-}
-      BUSINESS_DB_DIALECT: ${BACKEND_DB_DIALECT:-mysql}
-      BUSINESS_DB_DRIVER: ${BACKEND_DB_DRIVER:-aiomysql}
-      BUSINESS_DB_HOST: ${BACKEND_DB_HOST:-mysql}
-      BUSINESS_DB_PORT: ${BACKEND_DB_PORT:-3306}
-      BUSINESS_DB_NAME: ${BACKEND_DB_NAME:-flood_monitoring}
-      BUSINESS_DB_USER: ${BACKEND_DB_USER:-flood_user}
-      BUSINESS_DB_PASSWORD: ${BACKEND_DB_PASSWORD:-flood_monitoring_2025}
-      BUSINESS_DB_SERVICE_NAME: ${BACKEND_DB_SERVICE_NAME:-}
-      BUSINESS_DM_HOME: ${BACKEND_DM_HOME:-}
-      BUSINESS_DM_SVC_PATH: ${BACKEND_DM_SVC_PATH:-}
-      BUSINESS_AUTO_CREATE_SCHEMA: ${BACKEND_AUTO_CREATE_SCHEMA:-}
-      API_HOST: 0.0.0.0
-      API_PORT: 8000
-      DEBUG: ${DEBUG:-false}
-      SECRET_KEY: ${SECRET_KEY:-your-secret-key-change-this-in-production}
-      ACCESS_TOKEN_EXPIRE_MINUTES: ${ACCESS_TOKEN_EXPIRE_MINUTES:-30}
-      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost,http://localhost:80}
-      DATA_RETENTION_DAYS: ${DATA_RETENTION_DAYS:-14}
-      OFFLINE_TIMEOUT_MINUTES: ${OFFLINE_TIMEOUT_MINUTES:-60}
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-hbbwater}:${POSTGRES_PASSWORD:-hbbwater}@postgres:5432/${POSTGRES_DB:-hbbwater}
+      JWT_SECRET: ${JWT_SECRET:-change-this-course-demo-secret}
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-admin123456}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-admin@example.local}
+      MQTT_ENABLED: "true"
+      MQTT_HOST: emqx
+      MQTT_PORT: 1883
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8501,http://127.0.0.1:8501,http://localhost:8000}
       ALERT_COOLDOWN_MINUTES: ${ALERT_COOLDOWN_MINUTES:-30}
-      WORDPRESS_URL: http://wordpress
-      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-change-this-in-production}
+      OFFLINE_TIMEOUT_SECONDS: ${OFFLINE_TIMEOUT_SECONDS:-300}
+      WEBHOOK_URL: ${WEBHOOK_URL:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      NOTIFY_EMAIL_TO: ${NOTIFY_EMAIL_TO:-}
+    ports:
+      - "${API_PORT:-8000}:8000"
     depends_on:
-      mysql:
+      postgres:
         condition: service_healthy
-    volumes:
-      - backend_runtime:/app/runtime
-    networks:
-      - flood-network
+      emqx:
+        condition: service_started
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 10s
-
-  # Webhook 代理服务
-  webhook-proxy:
-    build:
-      context: ./webhook_proxy
-      dockerfile: Dockerfile
-    container_name: flood-monitoring-webhook
-    restart: unless-stopped
-    environment:
-      WEBHOOK_KEY: ${WEBHOOK_KEY:-}
-      API_ENDPOINT: http://backend:8000/sensors/data
-    ports:
-      - "8080:8080/tcp"
-      - "8080:8080/udp"
-    depends_on:
-      - backend
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     networks:
-      - flood-network
+      - hbbwater
 
-  # Vue 前端服务
   frontend:
     build:
       context: ./frontend
-      dockerfile: Dockerfile
-    container_name: flood-monitoring-frontend
-    restart: unless-stopped
-    networks:
-      - flood-network
-
-  # WordPress 后端（用于用户管理和邮件服务）
-  wordpress:
-    image: wordpress:6-php8.1-apache
-    container_name: flood-monitoring-wordpress
+    container_name: hbbwater-python-frontend
     restart: unless-stopped
     environment:
-      WORDPRESS_DB_HOST: mysql
-      WORDPRESS_DB_NAME: ${DB_NAME:-flood_monitoring}
-      WORDPRESS_DB_USER: ${DB_USER:-flood_user}
-      WORDPRESS_DB_PASSWORD: ${DB_PASSWORD:-flood_monitoring_2025}
-      WORDPRESS_TABLE_PREFIX: wp_
-      # 后端 API 地址
-      FLOOD_MONITOR_BACKEND_URL: http://backend:8000
-      FLOOD_MONITOR_SHARED_TOKEN: ${INTERNAL_API_TOKEN:-change-this-in-production}
-    volumes:
-      - wordpress_data:/var/www/html
-      - ./wordpress/wp-content/plugins:/var/www/html/wp-content/plugins:ro
+      API_BASE_URL: ${API_BASE_URL:-http://backend:8000/api}
+      API_PUBLIC_BASE_URL: ${API_PUBLIC_BASE_URL:-http://localhost:8000/api}
+    ports:
+      - "${FRONTEND_PORT:-8501}:8501"
     depends_on:
-      mysql:
+      backend:
         condition: service_healthy
     networks:
-      - flood-network
-
-  # Caddy 反向代理
-  caddy:
-    build:
-      context: ./caddy
-      dockerfile: Dockerfile
-    container_name: flood-monitoring-caddy
-    restart: unless-stopped
-    ports:
-      - "${HOST_HTTP_PORT:-80}:80"
-      - "8000:8000"
-    depends_on:
-      - backend
-      - frontend
-      - webhook-proxy
-      - wordpress
-    networks:
-      - flood-network
+      - hbbwater
 
 networks:
-  flood-network:
+  hbbwater:
     driver: bridge
 
 volumes:
-  backend_runtime:
-    driver: local
-  mysql_data:
-    driver: local
-  wordpress_data:
-    driver: local
+  postgres_data:
+  emqx_data:
+  emqx_log:
+

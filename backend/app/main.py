@@ -1,77 +1,42 @@
-"""FastAPI main application."""
+"""FastAPI entry point."""
+
 import asyncio
-import os
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.database import ControlBase, ControlSessionLocal, activate_business_database, control_engine, dispose_databases
-from app.routers import sensors, alerts, dashboard, config, account, auth
-from app.services.account import account_service
-from app.services.business_profiles import ensure_business_profiles_bootstrap, profile_to_settings
+from app.api.router import router
+from app.config import settings
+from app.database import SessionLocal, init_db
+from app.mqtt.client import MqttWorker
+from app.services.seed import seed_defaults
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan handler."""
-    print(f"[{datetime.utcnow()}] Flood Monitoring API starting up...")
+    await init_db()
+    async with SessionLocal() as session:
+        await seed_defaults(session)
 
-    async with control_engine.begin() as conn:
-        await conn.run_sync(ControlBase.metadata.create_all)
-
-    async with ControlSessionLocal() as control_db:
-        await account_service.ensure_bootstrap(control_db)
-        profiles = await ensure_business_profiles_bootstrap(control_db)
-        active_profile = next((profile for profile in profiles if profile.is_active), profiles[0])
-
-    max_attempts = int(
-        os.getenv("BUSINESS_DB_STARTUP_MAX_ATTEMPTS", os.getenv("DB_STARTUP_MAX_ATTEMPTS", "10"))
-    )
-    retry_delay = float(
-        os.getenv("BUSINESS_DB_STARTUP_RETRY_DELAY_SECONDS", os.getenv("DB_STARTUP_RETRY_DELAY_SECONDS", "3"))
-    )
-
-    last_error: Exception | None = None
-    for attempt in range(1, max_attempts + 1):
-        try:
-            await activate_business_database(profile_to_settings(active_profile))
-            last_error = None
-            break
-        except Exception as exc:
-            last_error = exc
-            if attempt == max_attempts:
-                break
-            print(
-                f"[{datetime.utcnow()}] Business database unavailable during startup "
-                f"(attempt {attempt}/{max_attempts}), retrying in {retry_delay}s..."
-            )
-            await asyncio.sleep(retry_delay)
-
-    if last_error is not None:
-        print(
-            f"[{datetime.utcnow()}] Business database startup deferred: {last_error}. "
-            "Control-plane endpoints will remain available."
-        )
-
+    mqtt_worker = MqttWorker(asyncio.get_running_loop())
+    app.state.mqtt_worker = mqtt_worker
+    mqtt_worker.start()
     yield
-
-    print(f"[{datetime.utcnow()}] Flood Monitoring API shutting down...")
-    await dispose_databases()
+    mqtt_worker.stop()
 
 
 app = FastAPI(
-    title="Flood Monitoring API",
-    description="校园水浸监测数据存储与可视化系统 API",
-    version="1.0.0",
+    title=settings.app_name,
+    description="纯 Python + MQTT 的校园水浸监测系统 API",
+    version="2.0.0-python",
     lifespan=lifespan,
 )
 
-allowed_origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000,http://localhost:5173").split(",")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=allowed_origins,
+    allow_origins=settings.cors_origin_list,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -79,47 +44,18 @@ app.add_middleware(
 
 
 @app.get("/health", tags=["health"])
-async def health_check():
-    """Health check endpoint."""
+async def health() -> dict:
     return {
         "status": "healthy",
-        "version": "1.0.0",
-        "service": "flood-monitoring-api",
-        "timestamp": datetime.utcnow().isoformat(),
+        "service": "hbbwater-python-api",
+        "mqtt_enabled": settings.mqtt_enabled,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
 
 @app.get("/", tags=["root"])
-async def root():
-    """API root endpoint."""
-    return {
-        "name": "Flood Monitoring API",
-        "version": "1.0.0",
-        "description": "校园水浸监测数据存储与可视化系统",
-        "docs": "/docs",
-        "health": "/health",
-    }
+async def root() -> dict:
+    return {"name": settings.app_name, "docs": "/docs", "health": "/health"}
 
 
-app.include_router(sensors.router, prefix="/api")
-app.include_router(alerts.router, prefix="/api")
-app.include_router(dashboard.router, prefix="/api")
-app.include_router(config.router, prefix="/api")
-app.include_router(account.router, prefix="/api")
-app.include_router(auth.router, prefix="/api")
-
-
-if __name__ == "__main__":
-    import uvicorn
-
-    host = os.getenv("API_HOST", "0.0.0.0")
-    port = int(os.getenv("API_PORT", "8000"))
-    debug = os.getenv("DEBUG", "false").lower() == "true"
-
-    uvicorn.run(
-        "app.main:app",
-        host=host,
-        port=port,
-        reload=debug,
-        log_level="info",
-    )
+app.include_router(router)

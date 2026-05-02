@@ -1,3 +1,0 @@
--- 兼容入口：MySQL 存储过程脚本已迁移到 database/mysql/procedures.sql
--- 如果你是手工执行，请改用：
---   source /mnt/e/CodeProjects/hbbwater/database/mysql/procedures.sql
