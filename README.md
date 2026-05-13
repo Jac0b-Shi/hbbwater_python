@@ -138,6 +138,8 @@ docker compose logs --tail=100 backend
 hbbwater/{device_type}/{device_id}/data
 ```
 
+RDK X5 + L07A 超声传感器的现场复刻部署流程见 [docs/rdk-x5-ultrasonic-deployment.md](docs/rdk-x5-ultrasonic-deployment.md)。该流程默认由 RDK X5 通过 `/dev/ttyS2` 采集超声距离，并通过局域网或 Tailscale/Headscale 发布到本项目自带 EMQX Broker。
+
 `device_type` 支持：
 
 - `ultrasonic`：超声波水位传感器
